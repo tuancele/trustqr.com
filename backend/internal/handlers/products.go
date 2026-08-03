@@ -68,6 +68,7 @@ type productBody struct {
 	Ingredients       string `json:"ingredients"`
 	UsageInstructions string `json:"usage_instructions"`
 	Warnings          string `json:"warnings"`
+	CompanyID         *int64 `json:"company_id"`
 	ImporterCompany   string `json:"importer_company"`
 	ImporterAddress   string `json:"importer_address"`
 	ImporterPhone     string `json:"importer_phone"`
@@ -146,6 +147,7 @@ func (h *ProductHandler) Get(c *fiber.Ctx) error {
 		Ingredients       *string    `json:"ingredients"`
 		UsageInstructions *string    `json:"usage_instructions"`
 		Warnings          *string    `json:"warnings"`
+		CompanyID         *int64     `json:"company_id"`
 		ImporterCompany   *string    `json:"importer_company"`
 		ImporterAddress   *string    `json:"importer_address"`
 		ImporterPhone     *string    `json:"importer_phone"`
@@ -162,12 +164,12 @@ func (h *ProductHandler) Get(c *fiber.Ctx) error {
 	}
 	err = h.DB.QueryRow(ctx, `
 		SELECT id, name, short_description, full_description, ingredients,
-		       usage_instructions, warnings, importer_company, importer_address,
+		       usage_instructions, warnings, company_id, importer_company, importer_address,
 		       importer_phone, origin_country, volume, license_number, barcode, gtin, image_url,
 		       is_active, created_at, updated_at
 		FROM products WHERE id = $1
 	`, id).Scan(&p.ID, &p.Name, &p.ShortDescription, &p.FullDescription, &p.Ingredients,
-		&p.UsageInstructions, &p.Warnings, &p.ImporterCompany, &p.ImporterAddress,
+		&p.UsageInstructions, &p.Warnings, &p.CompanyID, &p.ImporterCompany, &p.ImporterAddress,
 		&p.ImporterPhone, &p.OriginCountry, &p.Volume, &p.LicenseNumber, &p.Barcode, &p.GTIN, &p.ImageURL,
 		&p.IsActive, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
@@ -206,12 +208,12 @@ func (h *ProductHandler) Create(c *fiber.Ctx) error {
 	var id int64
 	err := h.DB.QueryRow(ctx, `
 		INSERT INTO products (name, short_description, full_description, ingredients,
-			usage_instructions, warnings, importer_company, importer_address, importer_phone,
+			usage_instructions, warnings, company_id, importer_company, importer_address, importer_phone,
 			origin_country, volume, license_number, barcode, gtin, image_url, is_active, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		RETURNING id
 	`, b.Name, b.ShortDescription, b.FullDescription, b.Ingredients,
-		b.UsageInstructions, b.Warnings, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
+		b.UsageInstructions, b.Warnings, b.CompanyID, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
 		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ImageURL, active, nullIfZeroInt64(adminID)).Scan(&id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
@@ -245,12 +247,12 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 	tag, err := h.DB.Exec(ctx, `
 		UPDATE products SET
 			name = $1, short_description = $2, full_description = $3, ingredients = $4,
-			usage_instructions = $5, warnings = $6, importer_company = $7, importer_address = $8,
-			importer_phone = $9, origin_country = $10, volume = $11, license_number = $12,
-			barcode = $13, gtin = $14, image_url = $15, is_active = $16
-		WHERE id = $17
+			usage_instructions = $5, warnings = $6, company_id = $7, importer_company = $8, importer_address = $9,
+			importer_phone = $10, origin_country = $11, volume = $12, license_number = $13,
+			barcode = $14, gtin = $15, image_url = $16, is_active = $17
+		WHERE id = $18
 	`, b.Name, b.ShortDescription, b.FullDescription, b.Ingredients,
-		b.UsageInstructions, b.Warnings, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
+		b.UsageInstructions, b.Warnings, b.CompanyID, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
 		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ImageURL, active, id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})

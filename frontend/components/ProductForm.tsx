@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Save, Loader2, Boxes, X, Upload } from 'lucide-react';
 import { api, uploadForm } from '@/lib/adminApi';
 import { PageHeader, Alert } from '@/components/ui';
+import { CompanyPicker, type Company } from '@/components/CompanyPicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -44,8 +45,27 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [company, setCompany] = useState<Company | null>(null);
 
   useEffect(() => { if (initial) setData(initial); }, [initial]);
+
+  useEffect(() => {
+    if (!initial?.company_id) { setCompany(null); return; }
+    api<Company>(`/api/v1/admin/companies/${initial.company_id}`).then((r) => {
+      if (r.ok && r.data) setCompany(r.data);
+    });
+  }, [initial?.company_id]);
+
+  function selectCompany(c: Company | null) {
+    setCompany(c);
+    setData((d) => ({
+      ...d,
+      company_id: c?.id ?? null,
+      importer_company: c?.name ?? d.importer_company,
+      importer_address: c?.address ?? d.importer_address,
+      importer_phone: c?.phone ?? d.importer_phone,
+    }));
+  }
 
   const set = <K extends keyof ProductData>(k: K, v: ProductData[K]) =>
     setData((d) => ({ ...d, [k]: v }));
@@ -111,13 +131,6 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
             />
           </Field>
 
-          <Field label="URL hình ảnh">
-            <input
-              value={data.image_url || ''} onChange={(e) => set('image_url', e.target.value)}
-              className="form-input" placeholder="https://..."
-              type="url"
-            />
-          </Field>
         </Section>
 
         {/* Product image slider */}
@@ -155,10 +168,7 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
         {/* Importer */}
         <Section title="Nhà nhập khẩu / phân phối">
           <Field label="Công ty">
-            <input
-              value={data.importer_company || ''} onChange={(e) => set('importer_company', e.target.value)}
-              className="form-input" placeholder="Công ty TNHH ABC Việt Nam"
-            />
+            <CompanyPicker value={company} onChange={selectCompany} />
           </Field>
           <Field label="Địa chỉ">
             <input
@@ -233,6 +243,8 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
   );
 }
 
+const MAX_PRODUCT_IMAGES = 12;
+
 function ProductImages({ productId, initialImages }: { productId: number; initialImages: ProductImageItem[] }) {
   const [images, setImages] = useState<ProductImageItem[]>(initialImages);
   const [uploading, setUploading] = useState(false);
@@ -240,19 +252,31 @@ function ProductImages({ productId, initialImages }: { productId: number; initia
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
     setUploading(true);
     setErr(null);
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await uploadForm<ProductImageItem>(`/api/v1/admin/products/${productId}/images`, fd);
-    setUploading(false);
-    if (r.ok && r.data) {
-      setImages((prev) => [...prev, r.data as ProductImageItem]);
-    } else {
-      setErr(r.error || 'Tải ảnh thất bại');
+    let slotsLeft = MAX_PRODUCT_IMAGES - images.length;
+    const skipped = Math.max(0, files.length - slotsLeft);
+    const uploaded: ProductImageItem[] = [];
+    let uploadErr: string | null = null;
+    for (const file of files) {
+      if (slotsLeft <= 0) break;
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await uploadForm<ProductImageItem>(`/api/v1/admin/products/${productId}/images`, fd);
+      if (r.ok && r.data) {
+        uploaded.push(r.data as ProductImageItem);
+        slotsLeft--;
+      } else {
+        uploadErr = r.error || 'Tải ảnh thất bại';
+        break;
+      }
     }
+    if (uploaded.length > 0) setImages((prev) => [...prev, ...uploaded]);
+    setUploading(false);
+    if (uploadErr) setErr(uploadErr);
+    else if (skipped > 0) setErr(`Đã tải ${uploaded.length} ảnh, bỏ qua ${skipped} ảnh do vượt quá tối đa ${MAX_PRODUCT_IMAGES} ảnh.`);
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -279,14 +303,16 @@ function ProductImages({ productId, initialImages }: { productId: number; initia
             </button>
           </div>
         ))}
-        <label className="aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-gov-400 hover:text-gov-500 cursor-pointer transition-colors">
-          {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
-          <span className="text-[10px]">Thêm ảnh</span>
-          <input
-            ref={fileRef} type="file" accept=".png,.jpg,.jpeg"
-            onChange={handleUpload} className="hidden" disabled={uploading}
-          />
-        </label>
+        {images.length < MAX_PRODUCT_IMAGES && (
+          <label className="aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-gov-400 hover:text-gov-500 cursor-pointer transition-colors">
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+            <span className="text-[10px]">Thêm ảnh</span>
+            <input
+              ref={fileRef} type="file" accept=".png,.jpg,.jpeg" multiple
+              onChange={handleUpload} className="hidden" disabled={uploading}
+            />
+          </label>
+        )}
       </div>
       <p className="text-xs text-gray-400">PNG/JPG, tối đa 8MB/ảnh, tối đa 12 ảnh. Ảnh hiển thị dạng slider ở trang khách quét QR.</p>
     </div>
