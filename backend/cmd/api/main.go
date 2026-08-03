@@ -113,6 +113,7 @@ func main() {
 	customer := &handlers.CustomerHandler{DB: pool, SMS: sms}
 	templates := &handlers.TemplateHandler{DB: pool, Audit: audit, StorageDir: cfg.TemplateStorageDir}
 	labelExport := &handlers.LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
+	adminUsers := &handlers.AdminUserHandler{DB: pool, Auth: authSvc, Audit: audit}
 
 	api := app.Group("/api/v1")
 
@@ -160,6 +161,13 @@ func main() {
 	protected.Post("/auth/2fa/setup", auth.TwoFASetupBegin)
 	protected.Post("/auth/2fa/enable", auth.TwoFAEnable)
 	protected.Post("/auth/2fa/disable", auth.TwoFADisable)
+
+	// Admin user management (add/edit/delete admin accounts)
+	protected.Get("/users", adminUsers.List)
+	protected.Post("/users", adminUsers.Create)
+	protected.Get("/users/:id", adminUsers.Get)
+	protected.Patch("/users/:id", adminUsers.Update)
+	protected.Delete("/users/:id", adminUsers.Delete)
 
 	protected.Post("/batches", admin.CreateBatch)
 	protected.Get("/batches", admin.ListBatches)

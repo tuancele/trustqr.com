@@ -19,6 +19,7 @@ import {
   LogOut,
   X,
   FileImage,
+  UserCog,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { clearTokens } from '@/lib/adminApi';
@@ -35,6 +36,7 @@ const navItems = [
   { href: '/admin/analytics',      label: 'Phân tích',       icon: BarChart3 },
   { href: '/admin/customers',      label: 'Khách hàng',      icon: Users },
   { href: '/admin/audit',          label: 'Nhật ký hệ thống', icon: ScrollText },
+  { href: '/admin/users',          label: 'Quản lý người dùng', icon: UserCog },
   { href: '/admin/settings',       label: 'Cài đặt',         icon: Settings },
 ];
 
