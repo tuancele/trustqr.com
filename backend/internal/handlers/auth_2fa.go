@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -54,7 +55,7 @@ func (h *AuthHandler) TwoFASetupBegin(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"secret":    key.Secret(),
 		"otpauth":   key.URL(),
-		"qr_helper": "https://api.qrserver.com/v1/create-qr-code/?data=" + key.URL(),
+		"qr_helper": "https://api.qrserver.com/v1/create-qr-code/?data=" + url.QueryEscape(key.URL()),
 	})
 }
 

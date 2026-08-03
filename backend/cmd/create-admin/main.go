@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 
 	"trustqr/backend/internal/config"
 	"trustqr/backend/internal/database"
@@ -65,5 +66,5 @@ func main() {
 	fmt.Println()
 	fmt.Println("👉 Add the TOTP Secret above to Google Authenticator / Authy.")
 	fmt.Println("   Or scan the URL as a QR code:")
-	fmt.Println("   https://api.qrserver.com/v1/create-qr-code/?data=" + key.URL())
+	fmt.Println("   https://api.qrserver.com/v1/create-qr-code/?data=" + url.QueryEscape(key.URL()))
 }
