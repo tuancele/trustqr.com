@@ -1,12 +1,12 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
-import { ShieldCheck, ShieldAlert, ShieldX, ShieldQuestion, MapPin, Package as PackageIcon, Hash, Clock, Ticket, Info } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone } from 'lucide-react';
 import { verifyCode, fetchProduct } from '@/lib/api';
 import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
 import { GeoReporter } from '@/components/GeoReporter';
 import { ImageSlider } from '@/components/ImageSlider';
-import { fmtDate } from '@/lib/utils';
+import { fmtDate, isMobileUA } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -15,6 +15,9 @@ export default async function VerifyPage({ params }: { params: { code: string } 
   const h = headers();
   const ip = h.get('x-forwarded-for') || h.get('x-real-ip') || '';
   const ua = h.get('user-agent') || '';
+
+  if (!isMobileUA(ua)) return <DesktopOnlyView />;
+
   const result = await verifyCode(params.code, ip, ua);
 
   if (!result || !result.valid) return <InvalidView />;
@@ -63,10 +66,6 @@ export default async function VerifyPage({ params }: { params: { code: string } 
               value={<ProductNameButton productId={result.company_id ?? null} productName={result.company_name} kind="company" />}
             />
           )}
-          {result.distributor_name && (
-            <InfoRow icon={PackageIcon} label="Đại lý" value={result.distributor_name} />
-          )}
-          <InfoRow icon={Hash} label="Lô sản xuất" value={result.batch_code || '—'} />
           <InfoRow icon={Clock} label="Số lần quét" value={
             <span className={isSuspicious ? 'font-bold text-amber-600' : 'font-bold text-emerald-600'}>
               {result.scan_count}
@@ -74,9 +73,6 @@ export default async function VerifyPage({ params }: { params: { code: string } 
           } />
           {result.first_scanned_at && (
             <InfoRow icon={Clock} label="Quét lần đầu" value={fmtDate(result.first_scanned_at)} />
-          )}
-          {result.first_scan_city && (
-            <InfoRow icon={MapPin} label="Vị trí lần đầu" value={result.first_scan_city} />
           )}
         </div>
 
@@ -107,6 +103,22 @@ export default async function VerifyPage({ params }: { params: { code: string } 
             <Link href="/customer/deletion" className="text-gov-600 hover:underline">Xóa dữ liệu</Link>
           </p>
         </div>
+      </div>
+    </main>
+  );
+}
+
+function DesktopOnlyView() {
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 flex items-center justify-center px-4">
+      <div className="max-w-sm text-center card p-8">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-gov-500 rounded-2xl shadow-lg ring-4 ring-gov-100 mb-4 mx-auto">
+          <Smartphone className="w-9 h-9 text-gold-400" strokeWidth={2} />
+        </div>
+        <h1 className="font-bold text-gov-700 text-lg mb-2">Vui lòng quét bằng điện thoại</h1>
+        <p className="text-sm text-gray-600">
+          Mã QR này chỉ có thể xác thực trên thiết bị di động. Vui lòng dùng camera điện thoại để quét lại mã QR.
+        </p>
       </div>
     </main>
   );

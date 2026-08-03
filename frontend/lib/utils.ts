@@ -24,3 +24,10 @@ export function fmtDateShort(d: string | Date | null | undefined): string {
   const date = typeof d === 'string' ? new Date(d) : d;
   return date.toLocaleDateString('vi-VN');
 }
+
+const MOBILE_UA_RE = /Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|Opera Mini|IEMobile|Mobile/i;
+
+export function isMobileUA(ua: string | null | undefined): boolean {
+  if (!ua) return false;
+  return MOBILE_UA_RE.test(ua);
+}
