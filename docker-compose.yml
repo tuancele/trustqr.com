@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: trustqr_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trustqr
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: trustqr_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Daily pg_dump backup - disabled by default in dev; uncomment for prod.
+  backup:
+    image: postgres:16-alpine
+    container_name: trustqr_backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_USER: postgres
+      DB_NAME: trustqr
+      PGPASSWORD: postgres
+      BACKUP_DIR: /backup
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./backup:/backup
+    entrypoint: >
+      sh -c "
+      apk add --no-cache dcron;
+      chmod +x /backup.sh;
+      echo '0 2 * * * /backup.sh >> /var/log/backup.log 2>&1' > /etc/crontabs/root;
+      touch /var/log/backup.log;
+      crond -f -l 2 &
+      tail -f /var/log/backup.log
+      "
+    profiles: ["prod"]
+
+volumes:
+  pgdata:
+  redisdata:

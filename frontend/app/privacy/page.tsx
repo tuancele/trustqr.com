@@ -1,0 +1,85 @@
+import Link from 'next/link';
+import { Shield, ArrowLeft } from 'lucide-react';
+
+export default function PrivacyPage() {
+  return (
+    <main className="min-h-screen bg-gray-50">
+      <div className="fixed top-0 inset-x-0 h-1.5 bg-gradient-to-r from-gov-500 via-gold-400 to-gov-500 z-10" />
+
+      <div className="max-w-3xl mx-auto px-4 py-12">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-11 h-11 bg-gov-500 rounded-xl flex items-center justify-center">
+            <Shield className="w-5 h-5 text-gold-400" strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gov-700">Chính sách bảo mật</h1>
+            <p className="text-sm text-gray-500">Phiên bản v1.0 · Cập nhật 2026-07-31</p>
+          </div>
+        </div>
+
+        <div className="card p-8 space-y-6 text-gray-700 leading-relaxed">
+          <Section number={1} title="Thông tin thu thập">
+            <p>Khi bạn quét mã QR và nhập số điện thoại, chúng tôi thu thập:</p>
+            <ul className="list-disc pl-6 space-y-1">
+              <li>Số điện thoại (để xác thực sản phẩm và cấp voucher)</li>
+              <li>Địa chỉ IP, User-Agent, thời gian quét (để phát hiện gian lận)</li>
+              <li>Vị trí thành phố suy ra từ IP (KHÔNG thu thập GPS)</li>
+            </ul>
+          </Section>
+
+          <Section number={2} title="Mục đích sử dụng">
+            <ul className="list-disc pl-6 space-y-1">
+              <li>Xác thực sản phẩm chính hãng và cấp voucher ưu đãi</li>
+              <li>Phát hiện và ngăn chặn hàng giả, hàng nhái</li>
+              <li>Gửi thông báo khuyến mãi qua SMS/Zalo <strong>chỉ khi bạn đồng ý riêng</strong></li>
+            </ul>
+          </Section>
+
+          <Section number={3} title="Quyền của bạn theo Nghị định 13/2023/NĐ-CP">
+            <ul className="list-disc pl-6 space-y-1">
+              <li>Yêu cầu xem, chỉnh sửa, hoặc xóa dữ liệu cá nhân</li>
+              <li>Rút lại sự đồng ý marketing bất cứ lúc nào</li>
+              <li>Liên hệ: <a href="mailto:privacy@trustqr.com" className="text-gov-600 hover:underline">privacy@trustqr.com</a></li>
+            </ul>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Link href="/customer/unsubscribe" className="btn-secondary text-sm">Ngừng marketing</Link>
+              <Link href="/customer/deletion" className="btn-danger text-sm">Xóa dữ liệu</Link>
+            </div>
+          </Section>
+
+          <Section number={4} title="Bảo mật">
+            <p>
+              Dữ liệu được lưu trữ mã hóa trên máy chủ tại Việt Nam. Chúng tôi <strong>không chia sẻ</strong>{' '}
+              SĐT của bạn cho bên thứ ba (không đại lý, không đối tác quảng cáo).
+            </p>
+          </Section>
+
+          <Section number={5} title="Thời gian lưu trữ">
+            <p>
+              Dữ liệu SĐT và lịch sử kích hoạt được lưu vĩnh viễn cho mục đích truy vết chống giả,
+              trừ khi bạn yêu cầu xóa.
+            </p>
+          </Section>
+        </div>
+
+        <div className="text-center mt-6">
+          <Link href="/" className="inline-flex items-center gap-1 text-sm text-gov-600 hover:underline">
+            <ArrowLeft className="w-3.5 h-3.5" /> Về trang chủ
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function Section({ number, title, children }: { number: number; title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="flex items-center gap-2 font-bold text-gov-700 text-lg mb-3">
+        <span className="w-7 h-7 bg-gov-100 text-gov-700 rounded-full flex items-center justify-center text-sm">{number}</span>
+        {title}
+      </h2>
+      <div className="pl-9 space-y-2">{children}</div>
+    </section>
+  );
+}

@@ -1,0 +1,68 @@
+package config
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
+type Config struct {
+	AppEnv             string
+	AppPort            string
+	PublicBaseURL      string
+	QRHMACSecret       string
+	JWTSecret          string
+	DBHost             string
+	DBPort             string
+	DBUser             string
+	DBPassword         string
+	DBName             string
+	DBSSLMode          string
+	RedisAddr          string
+	RedisPassword      string
+	CORSOrigins        string
+	TemplateStorageDir string
+	ProductImageStorageDir string
+}
+
+func Load() *Config {
+	_ = godotenv.Load()
+	_ = godotenv.Load("../.env")
+
+	c := &Config{
+		AppEnv:             env("APP_ENV", "development"),
+		AppPort:            env("APP_PORT", "8080"),
+		PublicBaseURL:      env("PUBLIC_BASE_URL", "http://localhost:3000"),
+		QRHMACSecret:       env("QR_HMAC_SECRET", ""),
+		JWTSecret:          env("JWT_SECRET", ""),
+		DBHost:             env("DB_HOST", "localhost"),
+		DBPort:             env("DB_PORT", "5432"),
+		DBUser:             env("DB_USER", "postgres"),
+		DBPassword:         env("DB_PASSWORD", "postgres"),
+		DBName:             env("DB_NAME", "trustqr"),
+		DBSSLMode:          env("DB_SSLMODE", "disable"),
+		RedisAddr:          env("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:      env("REDIS_PASSWORD", ""),
+		CORSOrigins:        env("CORS_ORIGINS", "http://localhost:3000"),
+		TemplateStorageDir: env("TEMPLATE_STORAGE_DIR", "./storage/templates"),
+		ProductImageStorageDir: env("PRODUCT_IMAGE_STORAGE_DIR", "./storage/product-images"),
+	}
+
+	if c.QRHMACSecret == "" {
+		panic("QR_HMAC_SECRET is required")
+	}
+	return c
+}
+
+func (c *Config) DatabaseURL() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName, c.DBSSLMode)
+}
+
+func env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}

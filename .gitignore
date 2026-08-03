@@ -1,0 +1,23 @@
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
+frontend/npm-debug.log*
+
+# Go build artifacts
+backend/*.exe
+backend/cmd/**/*.exe
+backend/.api.log
+*.log
+
+# Uploaded/generated storage (runtime data, not source)
+backend/storage/
+
+# OS
+.DS_Store
+Thumbs.db
