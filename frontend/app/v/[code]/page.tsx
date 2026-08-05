@@ -91,7 +91,7 @@ export default async function VerifyPage({ params }: { params: { code: string } 
               label="Thương hiệu"
               value={
                 result.brand_website ? (
-                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-gov-700 hover:underline font-semibold">
+                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-gray-900 hover:text-gov-600 hover:underline font-semibold underline-offset-2">
                     {result.brand_name}
                   </a>
                 ) : result.brand_name
