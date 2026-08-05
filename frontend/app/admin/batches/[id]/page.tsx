@@ -398,6 +398,7 @@ const SHEET_PRESETS_MM: Record<string, [number, number]> = {
   A3: [297, 420],
   A5: [148, 210],
   Letter: [215.9, 279.4],
+  '33x48cm': [330, 480],
 };
 
 interface TemplateOption {
@@ -417,7 +418,7 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
   const [fromSerial, setFromSerial] = useState(rangeStart);
   const [toSerial, setToSerial] = useState(Math.min(total, rangeStart + MAX_EXPORT_TOKENS - 1));
 
-  const [sheetPreset, setSheetPreset] = useState<'A4' | 'A3' | 'A5' | 'Letter' | 'custom'>('A4');
+  const [sheetPreset, setSheetPreset] = useState<'A4' | 'A3' | 'A5' | 'Letter' | '33x48cm' | 'custom'>('A4');
   const [customW, setCustomW] = useState('');
   const [customH, setCustomH] = useState('');
   const [marginMM, setMarginMM] = useState(5);
@@ -604,7 +605,7 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
             <div>
               <label className="form-label">Khổ giấy</label>
               <div className="flex gap-1.5 flex-wrap">
-                {(['A4', 'A3', 'A5', 'Letter'] as const).map((p) => (
+                {(['A4', 'A3', 'A5', 'Letter', '33x48cm'] as const).map((p) => (
                   <button type="button" key={p} onClick={() => setSheetPreset(p)}
                     className={`px-3 py-1.5 rounded text-xs font-medium border ${
                       sheetPreset === p ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'

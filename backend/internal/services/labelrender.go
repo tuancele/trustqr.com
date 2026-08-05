@@ -27,10 +27,11 @@ type GridSpec struct {
 
 // SheetPresets maps a preset name to {width_mm, height_mm} in portrait orientation.
 var SheetPresets = map[string][2]float64{
-	"A4":     {210, 297},
-	"A3":     {297, 420},
-	"A5":     {148, 210},
-	"Letter": {215.9, 279.4},
+	"A4":      {210, 297},
+	"A3":      {297, 420},
+	"A5":      {148, 210},
+	"Letter":  {215.9, 279.4},
+	"33x48cm": {330, 480},
 }
 
 // GridLayout computes how many labelW x labelH cells (mm) fit on a sheetW x sheetH
