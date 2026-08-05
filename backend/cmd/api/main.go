@@ -218,6 +218,7 @@ func main() {
 	protected.Get("/analytics/geo", adminExtra.GeoAnalytics)
 	protected.Get("/analytics/trend", adminExtra.ScanTrend)
 	protected.Get("/analytics/devices", adminExtra.DeviceBreakdown)
+	protected.Get("/analytics/scan-log", adminExtra.ScanLog)
 
 	protected.Get("/customers", adminExtra.ListCustomers)
 	protected.Get("/customers/export", adminExtra.ExportCustomers)

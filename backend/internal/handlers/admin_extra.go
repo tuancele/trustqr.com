@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -290,6 +292,96 @@ func (h *AdminExtraHandler) DeviceBreakdown(c *fiber.Ctx) error {
 		}
 	}
 	return c.JSON(fiber.Map{"days": days, "devices": devices, "os": oses, "browsers": browsers})
+}
+
+// -------- Analytics: raw scan log (per-scan detail) --------
+
+func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
+	days := 30
+	if d := c.Query("days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	page := 1
+	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
+		page = p
+	}
+	pageSize := 50
+	if ps, err := strconv.Atoi(c.Query("page_size")); err == nil && ps > 0 && ps <= 200 {
+		pageSize = ps
+	}
+	q := strings.TrimSpace(c.Query("q"))
+
+	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
+	defer cancel()
+
+	where := ` WHERE sl.scanned_at > NOW() - make_interval(days => $1)`
+	args := []any{days}
+	if q != "" {
+		args = append(args, "%"+q+"%")
+		where += fmt.Sprintf(` AND (t.secret_code ILIKE $%d OR b.product_name ILIKE $%d OR b.batch_code ILIKE $%d)`, len(args), len(args), len(args))
+	}
+
+	var total int
+	if err := h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM scan_logs sl
+		JOIN qr_tokens t ON t.id = sl.token_id
+		JOIN batches b ON b.id = t.batch_id
+	`+where, args...).Scan(&total); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "count"})
+	}
+
+	args = append(args, pageSize, (page-1)*pageSize)
+	rows, err := h.DB.Query(ctx, `
+		SELECT sl.id, sl.scanned_at, sl.is_repeat,
+		       t.secret_code, b.batch_code, b.product_name,
+		       COALESCE(sl.city,''), COALESCE(sl.region,''), COALESCE(sl.country,''),
+		       COALESCE(sl.device_type,''), COALESCE(sl.os_name,''), COALESCE(sl.os_version,''),
+		       COALESCE(sl.browser_name,''), COALESCE(sl.browser_version,''),
+		       COALESCE(sl.ip_address::text,''), sl.device_lat, sl.device_lng,
+		       COALESCE(sl.visitor_id,'')
+		FROM scan_logs sl
+		JOIN qr_tokens t ON t.id = sl.token_id
+		JOIN batches b ON b.id = t.batch_id
+	`+where+fmt.Sprintf(`
+		ORDER BY sl.scanned_at DESC
+		LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "query"})
+	}
+	defer rows.Close()
+
+	type row struct {
+		ID             int64     `json:"id"`
+		ScannedAt      time.Time `json:"scanned_at"`
+		IsRepeat       bool      `json:"is_repeat"`
+		SecretCode     string    `json:"secret_code"`
+		BatchCode      string    `json:"batch_code"`
+		ProductName    string    `json:"product_name"`
+		City           string    `json:"city"`
+		Region         string    `json:"region"`
+		Country        string    `json:"country"`
+		DeviceType     string    `json:"device_type"`
+		OSName         string    `json:"os_name"`
+		OSVersion      string    `json:"os_version"`
+		BrowserName    string    `json:"browser_name"`
+		BrowserVersion string    `json:"browser_version"`
+		IP             string    `json:"ip"`
+		Lat            *float64  `json:"lat"`
+		Lng            *float64  `json:"lng"`
+		VisitorID      string    `json:"visitor_id"`
+	}
+	out := []row{}
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.ID, &r.ScannedAt, &r.IsRepeat, &r.SecretCode, &r.BatchCode, &r.ProductName,
+			&r.City, &r.Region, &r.Country, &r.DeviceType, &r.OSName, &r.OSVersion,
+			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID); err == nil {
+			out = append(out, r)
+		}
+	}
+	return c.JSON(fiber.Map{"data": out, "total": total, "page": page, "page_size": pageSize})
 }
 
 // -------- Analytics: summary --------

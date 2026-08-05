@@ -6,11 +6,11 @@ import {
 } from 'recharts';
 import {
   BarChart3, ShieldAlert, MapPin, CheckCircle2, TrendingUp, Activity, Flame,
-  Smartphone, Cpu, Globe,
+  Smartphone, Cpu, Globe, ScanLine, Search, ChevronLeft, ChevronRight, Navigation,
 } from 'lucide-react';
 import { api } from '@/lib/adminApi';
 import { PageHeader, StatCard, Spinner, StatusBadge, EmptyState } from '@/components/ui';
-import { fmtNumber, fmtDateShort } from '@/lib/utils';
+import { fmtNumber, fmtDateShort, fmtDate } from '@/lib/utils';
 
 type TrendPoint = { day: string; scans: number; unique_tokens: number };
 type BreakdownItem = { label: string; count: number };
@@ -19,6 +19,15 @@ type FraudRow = {
   id: number; secret_code: string; scan_count: number; status: string;
   unique_ips: number; unique_cities: number; batch_code: string; product_name: string;
 };
+type ScanLogRow = {
+  id: number; scanned_at: string; is_repeat: boolean;
+  secret_code: string; batch_code: string; product_name: string;
+  city: string; region: string; country: string;
+  device_type: string; os_name: string; os_version: string;
+  browser_name: string; browser_version: string;
+  ip: string; lat: number | null; lng: number | null; visitor_id: string;
+};
+type ScanLogResp = { data: ScanLogRow[]; total: number; page: number; page_size: number };
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 
@@ -31,6 +40,32 @@ export default function AnalyticsPage() {
   const [browsers, setBrowsers] = useState<BreakdownItem[]>([]);
   const [geo, setGeo] = useState<GeoRow[]>([]);
   const [frauds, setFrauds] = useState<FraudRow[]>([]);
+
+  const [scanLog, setScanLog] = useState<ScanLogResp | null>(null);
+  const [scanLoading, setScanLoading] = useState(true);
+  const [scanPage, setScanPage] = useState(1);
+  const [scanQ, setScanQ] = useState('');
+  const [scanSearch, setScanSearch] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => { setScanSearch(scanQ); setScanPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [scanQ]);
+
+  useEffect(() => { setScanPage(1); }, [days]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setScanLoading(true);
+    const params = new URLSearchParams({ days: String(days), page: String(scanPage), page_size: '50' });
+    if (scanSearch) params.set('q', scanSearch);
+    api<ScanLogResp>(`/api/v1/admin/analytics/scan-log?${params}`).then((r) => {
+      if (cancelled) return;
+      if (r.ok && r.data) setScanLog(r.data);
+      setScanLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [days, scanPage, scanSearch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +258,113 @@ export default function AnalyticsPage() {
               </tbody>
             </table>
           </div>
+        )}
+      </section>
+
+      {/* Detailed scan log */}
+      <section className="card overflow-hidden mt-6">
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
+          <ScanLine className="w-4 h-4 text-gov-500" />
+          <h2 className="font-semibold text-gray-900">Nhật ký quét chi tiết</h2>
+          <span className="text-xs text-gray-500">({days} ngày qua)</span>
+          <div className="relative ml-auto">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={scanQ}
+              onChange={(e) => setScanQ(e.target.value)}
+              placeholder="Tìm mã tem, lô, sản phẩm..."
+              className="form-input pl-9 w-64 text-sm"
+            />
+          </div>
+          <span className="text-sm text-gray-500">{scanLog && `${fmtNumber(scanLog.total)} lượt`}</span>
+        </div>
+
+        {scanLoading && !scanLog ? (
+          <div className="p-10 flex justify-center"><Spinner /></div>
+        ) : !scanLog || scanLog.data.length === 0 ? (
+          <EmptyState
+            icon={ScanLine}
+            title="Chưa có lượt quét nào"
+            description={scanSearch ? 'Không có bản ghi khớp tìm kiếm.' : 'Sẽ xuất hiện khi có lượt quét từ khách.'}
+          />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-600 uppercase whitespace-nowrap">
+                    <th className="px-4 py-2.5">Thời gian</th>
+                    <th className="px-4 py-2.5">Tem</th>
+                    <th className="px-4 py-2.5">Vị trí</th>
+                    <th className="px-4 py-2.5">Thiết bị</th>
+                    <th className="px-4 py-2.5">IP</th>
+                    <th className="px-4 py-2.5">Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {scanLog.data.map((s) => (
+                    <tr key={s.id} className="hover:bg-gray-50 align-top">
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(s.scanned_at)}</td>
+
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs text-gov-700">{s.secret_code}</div>
+                        <div className="text-xs text-gray-500">{s.product_name} <span className="text-gray-400">· {s.batch_code}</span></div>
+                      </td>
+
+                      <td className="px-4 py-3 max-w-[200px]">
+                        <div className="flex items-center gap-1 text-xs text-gray-700">
+                          <MapPin className="w-3 h-3 flex-shrink-0 text-gray-400" />
+                          {[s.city, s.region, s.country].filter(Boolean).join(', ') || <span className="text-gray-400 italic">Không xác định</span>}
+                        </div>
+                        {s.lat != null && s.lng != null && (
+                          <div className="flex items-center gap-1 text-[11px] text-emerald-600 mt-0.5">
+                            <Navigation className="w-3 h-3" /> GPS {s.lat.toFixed(4)}, {s.lng.toFixed(4)}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 text-xs text-gray-700">
+                          <Smartphone className="w-3 h-3 flex-shrink-0 text-gray-400" />
+                          {s.device_type || 'Không xác định'}
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          {[s.os_name && `${s.os_name} ${s.os_version}`.trim(), s.browser_name && `${s.browser_name} ${s.browser_version}`.trim()]
+                            .filter(Boolean).join(' · ') || '—'}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{s.ip || '—'}</td>
+
+                      <td className="px-4 py-3">
+                        {s.is_repeat ? (
+                          <span className="badge-muted">Lặp lại</span>
+                        ) : (
+                          <span className="badge-success">Mới</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {scanLog.total > scanLog.page_size && (
+              <div className="flex justify-center items-center gap-2 py-4">
+                <button disabled={scanPage <= 1} onClick={() => setScanPage((p) => p - 1)}
+                  className="btn-secondary text-sm disabled:opacity-50">
+                  <ChevronLeft className="w-3.5 h-3.5" /> Trước
+                </button>
+                <span className="text-sm text-gray-600 px-3">
+                  Trang {scanPage} / {Math.max(1, Math.ceil(scanLog.total / scanLog.page_size))}
+                </span>
+                <button disabled={scanPage >= Math.ceil(scanLog.total / scanLog.page_size)} onClick={() => setScanPage((p) => p + 1)}
+                  className="btn-secondary text-sm disabled:opacity-50">
+                  Sau <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>
