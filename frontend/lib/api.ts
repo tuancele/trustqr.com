@@ -20,6 +20,7 @@ export interface VerifyResult {
   status?: string;
   warning?: string;
   voucher?: string;
+  security_code?: string;
 }
 
 export interface CompanyDetail {

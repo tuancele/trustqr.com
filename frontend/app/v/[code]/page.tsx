@@ -6,6 +6,7 @@ import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
 import { GeoReporter } from '@/components/GeoReporter';
 import { ImageSlider } from '@/components/ImageSlider';
+import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { fmtDate, isMobileUA } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -45,8 +46,15 @@ export default async function VerifyPage({ params }: { params: { code: string } 
           <p className="text-xs text-gray-500 mt-1">TrustQR</p>
         </div>
 
-        {/* Status banner */}
-        {isSuspicious ? <SuspiciousBanner count={result.scan_count} /> : <GenuineBanner />}
+        {/* Security code (manual-entry backup, independent from the QR itself) */}
+        {result.security_code && (
+          <div className="mb-4">
+            <CopySecurityCode code={result.security_code} />
+          </div>
+        )}
+
+        {/* Verification result */}
+        <ResultCard suspicious={isSuspicious} count={result.scan_count} />
 
         {/* Product image slider */}
         {product?.images && product.images.length > 0 && <ImageSlider images={product.images} />}
@@ -124,34 +132,44 @@ function DesktopOnlyView() {
   );
 }
 
-function GenuineBanner() {
+function ResultCard({ suspicious, count }: { suspicious: boolean; count: number }) {
   return (
-    <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-5 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
-          <ShieldCheck className="w-7 h-7 text-white" strokeWidth={2.5} />
+    <div className={`rounded-2xl border-2 p-5 shadow-sm ${suspicious ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50'}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 space-y-3 min-w-0">
+          <div>
+            <div className="text-xs text-gray-500">Kết quả</div>
+            <div className={`text-sm font-semibold mt-0.5 ${suspicious ? 'text-amber-800' : 'text-emerald-800'}`}>
+              {suspicious ? 'Mã này đã được quét nhiều lần — có thể là hàng giả.' : 'Sản phẩm này là sản phẩm chính hãng.'}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Xác nhận</div>
+            <div className="text-sm font-medium text-gray-900 mt-0.5">
+              Đã xác thực <strong>{count}</strong> lần
+            </div>
+          </div>
         </div>
-        <div>
-          <div className="text-lg font-bold text-emerald-800">SẢN PHẨM CHÍNH HÃNG</div>
-          <div className="text-xs text-emerald-700 mt-0.5">Mã QR hợp lệ, chưa từng bị quét trước đây</div>
-        </div>
+        {suspicious ? <WarningBadge /> : <GenuineBadge />}
       </div>
     </div>
   );
 }
 
-function SuspiciousBanner({ count }: { count: number }) {
+function GenuineBadge() {
   return (
-    <div className="rounded-2xl border-2 border-amber-500 bg-amber-50 p-5 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
-          <ShieldAlert className="w-7 h-7 text-white" strokeWidth={2.5} />
-        </div>
-        <div>
-          <div className="text-lg font-bold text-amber-800">CẢNH BÁO NGHI GIẢ</div>
-          <div className="text-xs text-amber-700 mt-0.5">Mã này đã được quét <strong>{count}</strong> lần trước đây</div>
-        </div>
-      </div>
+    <div className="flex-shrink-0 flex flex-col items-center justify-center w-20 h-20 rounded-full border-2 border-emerald-500 bg-white">
+      <ShieldCheck className="w-7 h-7 text-emerald-600" strokeWidth={2.5} />
+      <span className="text-[9px] font-bold text-emerald-700 mt-0.5 tracking-wide">CHÍNH HÃNG</span>
+    </div>
+  );
+}
+
+function WarningBadge() {
+  return (
+    <div className="flex-shrink-0 flex flex-col items-center justify-center w-20 h-20 rounded-full border-2 border-amber-500 bg-white">
+      <ShieldAlert className="w-7 h-7 text-amber-600" strokeWidth={2.5} />
+      <span className="text-[9px] font-bold text-amber-700 mt-0.5 tracking-wide">NGHI VẤN</span>
     </div>
   );
 }

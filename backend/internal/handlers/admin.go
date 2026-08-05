@@ -83,16 +83,22 @@ func (h *AdminHandler) CreateBatch(c *fiber.Ctx) error {
 
 	// Generate codes + assign serial_no + inherit product_id from batch if provided
 	codes := make([]string, 0, req.Quantity)
+	securityCodes := make([]string, 0, req.Quantity)
 	sample := ""
 	for i := 0; i < req.Quantity; i++ {
 		code, err := h.Tokens.Generate()
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "gen_token"})
 		}
+		secCode, err := services.GenerateSecurityCode()
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "gen_security_code"})
+		}
 		if sample == "" {
 			sample = code
 		}
 		codes = append(codes, code)
+		securityCodes = append(securityCodes, secCode)
 	}
 
 	rows := make([][]any, len(codes))
@@ -101,12 +107,12 @@ func (h *AdminHandler) CreateBatch(c *fiber.Ctx) error {
 		pid = req.ProductID
 	}
 	for i, code := range codes {
-		// batch_id, secret_code, status, serial_no, product_id, is_ready
-		rows[i] = []any{batchID, code, "pending", i + 1, pid, req.ProductID > 0}
+		// batch_id, secret_code, security_code, status, serial_no, product_id, is_ready
+		rows[i] = []any{batchID, code, securityCodes[i], "pending", i + 1, pid, req.ProductID > 0}
 	}
 	_, err = tx.CopyFrom(ctx,
 		pgx.Identifier{"qr_tokens"},
-		[]string{"batch_id", "secret_code", "status", "serial_no", "product_id", "is_ready"},
+		[]string{"batch_id", "secret_code", "security_code", "status", "serial_no", "product_id", "is_ready"},
 		pgx.CopyFromRows(rows),
 	)
 	if err != nil {

@@ -50,6 +50,7 @@ type verifyResp struct {
 	Status          string  `json:"status,omitempty"`
 	Warning         string  `json:"warning,omitempty"`
 	Voucher         string  `json:"voucher,omitempty"`
+	SecurityCode    string  `json:"security_code,omitempty"`
 }
 
 func (h *QRHandler) Verify(c *fiber.Ctx) error {
@@ -86,6 +87,7 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		status         string
 		tokenProductID *int64
 		tokenDistID    *int64
+		securityCode   *string
 	)
 	err := h.DB.QueryRow(ctx, `
 		UPDATE qr_tokens
@@ -105,9 +107,9 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		WHERE secret_code = $1
 		RETURNING id, batch_id, COALESCE(serial_no,0), scan_count, first_scanned_at,
 		          COALESCE(first_scan_city,''), is_activated, is_ready, activated_voucher, status,
-		          product_id, distributor_id
+		          product_id, distributor_id, security_code
 	`, req.Code, city, nullIfEmpty(ip)).Scan(&tokenID, &batchID, &serialNo, &scanCount, &firstScannedAt,
-		&firstScanCity, &isActivated, &isReady, &voucher, &status, &tokenProductID, &tokenDistID)
+		&firstScanCity, &isActivated, &isReady, &voucher, &status, &tokenProductID, &tokenDistID, &securityCode)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -160,6 +162,15 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		})
 	}
 
+	// Legacy tokens created before security_code existed — generate + persist on first scan.
+	if securityCode == nil {
+		if sc, genErr := services.GenerateSecurityCode(); genErr == nil {
+			if _, updErr := h.DB.Exec(ctx, `UPDATE qr_tokens SET security_code=$1 WHERE id=$2`, sc, tokenID); updErr == nil {
+				securityCode = &sc
+			}
+		}
+	}
+
 	// Fetch product/company/distributor info for ready tokens
 	var (
 		productName     string
@@ -196,6 +207,9 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		IsActivated:     isActivated,
 		FirstScanCity:   firstScanCity,
 		Status:          status,
+	}
+	if securityCode != nil {
+		resp.SecurityCode = *securityCode
 	}
 	if firstScannedAt != nil {
 		s := firstScannedAt.Format(time.RFC3339)
