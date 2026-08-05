@@ -336,7 +336,7 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := h.DB.Query(ctx, `
 		SELECT sl.id, sl.scanned_at, sl.is_repeat,
-		       t.secret_code, b.batch_code, b.product_name,
+		       t.secret_code, b.batch_code, COALESCE(b.product_name,''),
 		       COALESCE(sl.city,''), COALESCE(sl.region,''), COALESCE(sl.country,''),
 		       COALESCE(sl.device_type,''), COALESCE(sl.os_name,''), COALESCE(sl.os_version,''),
 		       COALESCE(sl.browser_name,''), COALESCE(sl.browser_version,''),
