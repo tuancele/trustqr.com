@@ -53,6 +53,12 @@ func main() {
 	if err := os.MkdirAll(cfg.ProductImageStorageDir, 0755); err != nil {
 		log.Fatalf("product image storage dir: %v", err)
 	}
+	if err := os.MkdirAll(cfg.BrandLogoStorageDir, 0755); err != nil {
+		log.Fatalf("brand logo storage dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.PromoBannerStorageDir, 0755); err != nil {
+		log.Fatalf("promo banner storage dir: %v", err)
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName:            "trustqr-api",
@@ -108,6 +114,8 @@ func main() {
 	adminExtra := &handlers.AdminExtraHandler{DB: pool, Audit: audit}
 	products := &handlers.ProductHandler{DB: pool, Audit: audit, StorageDir: cfg.ProductImageStorageDir}
 	companies := &handlers.CompanyHandler{DB: pool, Audit: audit}
+	brands := &handlers.BrandHandler{DB: pool, Audit: audit, StorageDir: cfg.BrandLogoStorageDir}
+	banners := &handlers.PromoBannerHandler{DB: pool, Audit: audit, StorageDir: cfg.PromoBannerStorageDir}
 	distributors := &handlers.DistributorHandler{DB: pool, Audit: audit}
 	auth := &handlers.AuthHandler{DB: pool, Auth: authSvc, Audit: audit}
 	customer := &handlers.CustomerHandler{DB: pool, SMS: sms}
@@ -135,6 +143,11 @@ func main() {
 	api.Get("/products/:id", products.Get)
 	api.Get("/products/:id/images/:imageId/file", products.ServeImage)
 	api.Get("/companies/:id", companies.Get)
+
+	// Public promo banners + brand logos (for verify page header)
+	api.Get("/banners", banners.PublicList)
+	api.Get("/banners/:id/file", banners.ServeImage)
+	api.Get("/brands/:id/logo/file", brands.ServeLogo)
 
 	// Customer NĐ13 endpoints
 	api.Post("/customer/deletion-request",
@@ -205,6 +218,20 @@ func main() {
 	protected.Get("/companies/:id", companies.Get)
 	protected.Patch("/companies/:id", companies.Update)
 	protected.Delete("/companies/:id", companies.Delete)
+
+	// Brands CRUD
+	protected.Get("/brands", brands.List)
+	protected.Post("/brands", brands.Create)
+	protected.Get("/brands/:id", brands.Get)
+	protected.Patch("/brands/:id", brands.Update)
+	protected.Delete("/brands/:id", brands.Delete)
+	protected.Post("/brands/:id/logo", brands.UploadLogo)
+
+	// Promo banners CRUD
+	protected.Get("/banners", banners.AdminList)
+	protected.Post("/banners", banners.Create)
+	protected.Patch("/banners/:id", banners.Update)
+	protected.Delete("/banners/:id", banners.Delete)
 
 	// Distributors CRUD
 	protected.Get("/distributors", distributors.List)

@@ -21,6 +21,10 @@ export interface VerifyResult {
   warning?: string;
   voucher?: string;
   security_code?: string;
+  brand_id?: number;
+  brand_name?: string;
+  brand_website?: string;
+  brand_logo_url?: string;
 }
 
 export interface CompanyDetail {
@@ -99,6 +103,22 @@ export async function isAdminSession(cookieHeader: string): Promise<boolean> {
   }
 }
 
+export interface PromoBanner {
+  id: number;
+  url: string;
+  link_url: string | null;
+}
+
+export async function fetchPromoBanners(): Promise<PromoBanner[]> {
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  try {
+    const res = await fetch(`${publicUrl}/api/v1/banners`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = (await res.json()) as PromoBanner[];
+    return data.map((b) => ({ ...b, url: `${publicUrl}${b.url}` }));
+  } catch { return []; }
+}
+
 export async function verifyCode(
   code: string,
   ip?: string,
@@ -122,7 +142,12 @@ export async function verifyCode(
       cache: 'no-store',
     });
     if (!res.ok) return null;
-    return (await res.json()) as VerifyResult;
+    const data = (await res.json()) as VerifyResult;
+    if (data.brand_logo_url) {
+      const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      data.brand_logo_url = `${publicUrl}${data.brand_logo_url}`;
+    }
+    return data;
   } catch (e) {
     console.error('verifyCode error:', e);
     return null;

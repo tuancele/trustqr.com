@@ -1,11 +1,12 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
-import { ShieldCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone } from 'lucide-react';
-import { verifyCode, fetchProduct, isAdminSession } from '@/lib/api';
+import { BadgeCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone } from 'lucide-react';
+import { verifyCode, fetchProduct, fetchPromoBanners, isAdminSession } from '@/lib/api';
 import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
 import { DeviceEnricher } from '@/components/DeviceEnricher';
 import { ImageSlider } from '@/components/ImageSlider';
+import { PromoBannerSlider } from '@/components/PromoBannerSlider';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { fmtDate, isMobileUA } from '@/lib/utils';
 
@@ -30,7 +31,10 @@ export default async function VerifyPage({ params }: { params: { code: string } 
   if (result.needs_activation) return <PendingActivationView code={params.code} batchCode={result.batch_code} serialNo={result.serial_no} />;
 
   const isSuspicious = result.scan_count > 1 || result.status === 'flagged' || result.status === 'disabled';
-  const product = result.product_id ? await fetchProduct(result.product_id) : null;
+  const [product, banners] = await Promise.all([
+    result.product_id ? fetchProduct(result.product_id) : Promise.resolve(null),
+    fetchPromoBanners(),
+  ]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 py-8 px-4">
@@ -40,14 +44,25 @@ export default async function VerifyPage({ params }: { params: { code: string } 
       <div className="fixed top-0 inset-x-0 h-1.5 bg-gradient-to-r from-gov-500 via-gold-400 to-gov-500 z-10" />
 
       <div className="max-w-md mx-auto">
-        {/* Emblem */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gov-500 rounded-2xl shadow-lg ring-4 ring-gov-100 mb-3">
-            <ShieldCheck className="w-9 h-9 text-gold-400" strokeWidth={2} />
+        {/* Promo banner slider (admin-managed) */}
+        {banners.length > 0 && (
+          <div className="mb-4">
+            <PromoBannerSlider banners={banners} />
           </div>
-          <h1 className="font-bold text-gov-700 text-lg">HỆ THỐNG XÁC THỰC CHÍNH HÃNG</h1>
-          <p className="text-xs text-gray-500 mt-1">TrustQR</p>
-        </div>
+        )}
+
+        {/* Brand logo (resolved from the scanned product's assigned brand) */}
+        {result.brand_logo_url && (
+          <div className="flex justify-center mb-6">
+            {result.brand_website ? (
+              <a href={result.brand_website} target="_blank" rel="noopener noreferrer">
+                <img src={result.brand_logo_url} alt={result.brand_name || ''} className="h-12 object-contain" />
+              </a>
+            ) : (
+              <img src={result.brand_logo_url} alt={result.brand_name || ''} className="h-12 object-contain" />
+            )}
+          </div>
+        )}
 
         {/* Security code (manual-entry backup, independent from the QR itself) */}
         {result.security_code && (
@@ -151,10 +166,9 @@ function ResultCard({ count }: { count: number }) {
 function CertifiedBadge() {
   return (
     <div className="flex-shrink-0 relative w-[72px] h-[72px]">
-      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-gov-500 to-gov-700 shadow-md" />
-      <div className="absolute inset-[3px] rounded-full border-2 border-gold-300" />
+      <div className="absolute inset-0 rounded-full bg-[#1877F2] shadow-md" />
       <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-        <ShieldCheck className="w-6 h-6 text-gold-300" strokeWidth={2.5} />
+        <BadgeCheck className="w-8 h-8" strokeWidth={2.5} fill="white" color="#1877F2" />
         <span className="text-[7px] font-bold tracking-wide mt-0.5 leading-none">CHÍNH HÃNG</span>
       </div>
     </div>

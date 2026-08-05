@@ -20,6 +20,8 @@ import {
   X,
   FileImage,
   UserCog,
+  Tag,
+  GalleryHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { clearTokens } from '@/lib/adminApi';
@@ -27,6 +29,8 @@ import { clearTokens } from '@/lib/adminApi';
 const navItems = [
   { href: '/admin/dashboard',      label: 'Tổng quan',       icon: LayoutDashboard, exact: true },
   { href: '/admin/companies',      label: 'Công ty',         icon: Building2 },
+  { href: '/admin/brands',         label: 'Thương hiệu',     icon: Tag },
+  { href: '/admin/banners',        label: 'Banner quảng cáo', icon: GalleryHorizontal },
   { href: '/admin/products',       label: 'Sản phẩm',        icon: Boxes },
   { href: '/admin/distributors',   label: 'Đại lý',          icon: Truck },
   { href: '/admin/batches',        label: 'Lô sản xuất',     icon: Package },

@@ -24,6 +24,8 @@ type Config struct {
 	CORSOrigins        string
 	TemplateStorageDir string
 	ProductImageStorageDir string
+	BrandLogoStorageDir string
+	PromoBannerStorageDir string
 }
 
 func Load() *Config {
@@ -47,6 +49,8 @@ func Load() *Config {
 		CORSOrigins:        env("CORS_ORIGINS", "http://localhost:3000"),
 		TemplateStorageDir: env("TEMPLATE_STORAGE_DIR", "./storage/templates"),
 		ProductImageStorageDir: env("PRODUCT_IMAGE_STORAGE_DIR", "./storage/product-images"),
+		BrandLogoStorageDir: env("BRAND_LOGO_STORAGE_DIR", "./storage/brand-logos"),
+		PromoBannerStorageDir: env("PROMO_BANNER_STORAGE_DIR", "./storage/banners"),
 	}
 
 	if c.QRHMACSecret == "" {

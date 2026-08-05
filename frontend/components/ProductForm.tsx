@@ -7,6 +7,7 @@ import { Save, Loader2, Boxes, X, Upload } from 'lucide-react';
 import { api, uploadForm } from '@/lib/adminApi';
 import { PageHeader, Alert } from '@/components/ui';
 import { CompanyPicker, type Company } from '@/components/CompanyPicker';
+import { BrandPicker, type Brand } from '@/components/BrandPicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -24,6 +25,7 @@ export interface ProductData {
   usage_instructions?: string | null;
   warnings?: string | null;
   company_id?: number | null;
+  brand_id?: number | null;
   importer_company?: string | null;
   importer_address?: string | null;
   importer_phone?: string | null;
@@ -46,6 +48,7 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  const [brand, setBrand] = useState<Brand | null>(null);
 
   useEffect(() => { if (initial) setData(initial); }, [initial]);
 
@@ -56,6 +59,13 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
     });
   }, [initial?.company_id]);
 
+  useEffect(() => {
+    if (!initial?.brand_id) { setBrand(null); return; }
+    api<Brand>(`/api/v1/admin/brands/${initial.brand_id}`).then((r) => {
+      if (r.ok && r.data) setBrand(r.data);
+    });
+  }, [initial?.brand_id]);
+
   function selectCompany(c: Company | null) {
     setCompany(c);
     setData((d) => ({
@@ -65,6 +75,11 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
       importer_address: c?.address ?? d.importer_address,
       importer_phone: c?.phone ?? d.importer_phone,
     }));
+  }
+
+  function selectBrand(b: Brand | null) {
+    setBrand(b);
+    setData((d) => ({ ...d, brand_id: b?.id ?? null }));
   }
 
   const set = <K extends keyof ProductData>(k: K, v: ProductData[K]) =>
@@ -131,6 +146,16 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
             />
           </Field>
 
+        </Section>
+
+        {/* Brand */}
+        <Section title="Thương hiệu">
+          <Field label="Thương hiệu">
+            <BrandPicker value={brand} onChange={selectBrand} />
+          </Field>
+          <p className="text-xs text-gray-500 -mt-2">
+            Logo thương hiệu hiển thị dưới banner khuyến mãi ở trang khách quét QR.
+          </p>
         </Section>
 
         {/* Product image slider */}

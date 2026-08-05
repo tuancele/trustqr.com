@@ -34,6 +34,10 @@ type verifyResp struct {
 	ProductName     string  `json:"product_name,omitempty"`
 	CompanyID       *int64  `json:"company_id,omitempty"`
 	CompanyName     string  `json:"company_name,omitempty"`
+	BrandID         *int64  `json:"brand_id,omitempty"`
+	BrandName       string  `json:"brand_name,omitempty"`
+	BrandWebsite    string  `json:"brand_website,omitempty"`
+	BrandLogoURL    string  `json:"brand_logo_url,omitempty"`
 	DistributorID   *int64  `json:"distributor_id,omitempty"`
 	DistributorName string  `json:"distributor_name,omitempty"`
 	BatchCode       string  `json:"batch_code,omitempty"`
@@ -184,14 +188,22 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		productName     string
 		companyID       *int64
 		companyName     string
+		brandID         *int64
+		brandName       string
+		brandWebsite    string
+		brandHasLogo    bool
 		distributorName string
 	)
 	if effectiveProductID != nil {
 		_ = h.DB.QueryRow(ctx, `
-			SELECT p.name, p.company_id, COALESCE(c.name, '')
-			FROM products p LEFT JOIN companies c ON c.id = p.company_id
+			SELECT p.name, p.company_id, COALESCE(c.name, ''),
+			       p.brand_id, COALESCE(b.name, ''), COALESCE(b.website, ''), (b.logo_path IS NOT NULL)
+			FROM products p
+			LEFT JOIN companies c ON c.id = p.company_id
+			LEFT JOIN brands b ON b.id = p.brand_id
 			WHERE p.id = $1
-		`, *effectiveProductID).Scan(&productName, &companyID, &companyName)
+		`, *effectiveProductID).Scan(&productName, &companyID, &companyName,
+			&brandID, &brandName, &brandWebsite, &brandHasLogo)
 	} else if batchProductName != nil {
 		productName = *batchProductName
 	}
@@ -205,6 +217,9 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		ProductName:     productName,
 		CompanyID:       companyID,
 		CompanyName:     companyName,
+		BrandID:         brandID,
+		BrandName:       brandName,
+		BrandWebsite:    brandWebsite,
 		DistributorID:   tokenDistID,
 		DistributorName: distributorName,
 		BatchCode:       batchCode,
@@ -218,6 +233,9 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 	}
 	if securityCode != nil {
 		resp.SecurityCode = *securityCode
+	}
+	if brandID != nil && brandHasLogo {
+		resp.BrandLogoURL = fmt.Sprintf("/api/v1/brands/%d/logo/file", *brandID)
 	}
 	if firstScannedAt != nil {
 		s := firstScannedAt.Format(time.RFC3339)
