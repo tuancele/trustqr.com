@@ -33,22 +33,22 @@ export function ImageSlider({ images }: { images: ProductImage[] }) {
             >
               <ChevronRight className="w-4 h-4 text-gray-700" />
             </button>
+            <div className="absolute bottom-2 inset-x-0 flex items-center justify-center">
+              <div className="flex items-center gap-1.5 bg-black/25 backdrop-blur-sm rounded-full px-2.5 py-1.5">
+                {images.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setIndex(i)}
+                    aria-label={`Ảnh ${i + 1}`}
+                    className={`w-1.5 h-1.5 rounded-full transition-colors ${i === index ? 'bg-white' : 'bg-white/50'}`}
+                  />
+                ))}
+              </div>
+            </div>
           </>
         )}
       </div>
-      {images.length > 1 && (
-        <div className="flex items-center justify-center gap-1.5 py-2.5">
-          {images.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setIndex(i)}
-              aria-label={`Ảnh ${i + 1}`}
-              className={`w-1.5 h-1.5 rounded-full transition-colors ${i === index ? 'bg-gov-500' : 'bg-gray-300'}`}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
