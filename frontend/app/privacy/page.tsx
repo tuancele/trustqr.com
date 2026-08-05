@@ -13,17 +13,30 @@ export default function PrivacyPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gov-700">Chính sách bảo mật</h1>
-            <p className="text-sm text-gray-500">Phiên bản v1.0 · Cập nhật 2026-07-31</p>
+            <p className="text-sm text-gray-500">Phiên bản v1.1 · Cập nhật 2026-08-05</p>
           </div>
         </div>
 
         <div className="card p-8 space-y-6 text-gray-700 leading-relaxed">
           <Section number={1} title="Thông tin thu thập">
-            <p>Khi bạn quét mã QR và nhập số điện thoại, chúng tôi thu thập:</p>
+            <p>Khi bạn quét mã QR, chúng tôi thu thập các nhóm thông tin sau, trong giới hạn cho phép của chính sách trình duyệt di động iOS/Android:</p>
             <ul className="list-disc pl-6 space-y-1">
-              <li>Số điện thoại (để xác thực sản phẩm và cấp voucher)</li>
+              <li>Số điện thoại, nếu bạn nhập để kích hoạt/xác thực sản phẩm và nhận voucher</li>
               <li>Địa chỉ IP, User-Agent, thời gian quét (để phát hiện gian lận)</li>
-              <li>Vị trí thành phố suy ra từ IP (KHÔNG thu thập GPS)</li>
+              <li>Vị trí thành phố suy ra từ IP</li>
+              <li>
+                Vị trí GPS chính xác hơn — <strong>chỉ khi trình duyệt của bạn cấp quyền</strong>; nếu bạn từ chối
+                hoặc thiết bị không hỗ trợ, chúng tôi chỉ dùng vị trí suy ra từ IP ở trên
+              </li>
+              <li>Loại thiết bị, hệ điều hành, trình duyệt — nhận diện tự động từ User-Agent, không cần xin quyền riêng</li>
+              <li>Ngôn ngữ trình duyệt, múi giờ, kích thước màn hình</li>
+              <li>Trang giới thiệu (referrer), nếu bạn mở mã QR từ một liên kết chia sẻ thay vì quét trực tiếp bằng camera</li>
+              <li>
+                Một mã định danh ẩn danh lưu trong cookie trình duyệt (<code className="text-xs bg-gray-100 px-1 py-0.5 rounded">trustqr_vid</code>)
+                để nhận biết các lượt quét lặp lại trên cùng thiết bị — <strong>không phải</strong> mã định danh thiết bị thật
+                (IMEI/IDFA/GAID), do nền tảng iOS/Android không cho phép trình duyệt web truy cập các mã này; cookie sẽ mất
+                nếu bạn xóa dữ liệu trình duyệt hoặc dùng thiết bị/trình duyệt khác
+              </li>
             </ul>
           </Section>
 

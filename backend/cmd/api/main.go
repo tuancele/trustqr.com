@@ -126,6 +126,10 @@ func main() {
 		appmw.RateLimit(rdb, "activate_ip", 10, time.Minute, appmw.ClientIP),
 		qr.Activate,
 	)
+	api.Post("/qr/enrich",
+		appmw.RateLimit(rdb, "enrich_ip", 20, time.Minute, appmw.ClientIP),
+		qr.Enrich,
+	)
 
 	// Public product/company info (for verify page modal)
 	api.Get("/products/:id", products.Get)
@@ -212,6 +216,8 @@ func main() {
 	protected.Get("/analytics/summary", adminExtra.Summary)
 	protected.Get("/analytics/frauds", adminExtra.FraudList)
 	protected.Get("/analytics/geo", adminExtra.GeoAnalytics)
+	protected.Get("/analytics/trend", adminExtra.ScanTrend)
+	protected.Get("/analytics/devices", adminExtra.DeviceBreakdown)
 
 	protected.Get("/customers", adminExtra.ListCustomers)
 	protected.Get("/customers/export", adminExtra.ExportCustomers)

@@ -99,7 +99,14 @@ export async function isAdminSession(cookieHeader: string): Promise<boolean> {
   }
 }
 
-export async function verifyCode(code: string, ip?: string, userAgent?: string): Promise<VerifyResult | null> {
+export async function verifyCode(
+  code: string,
+  ip?: string,
+  userAgent?: string,
+  visitorId?: string,
+  acceptLanguage?: string,
+  referer?: string
+): Promise<VerifyResult | null> {
   try {
     const res = await fetch(`${API_URL}/api/v1/qr/verify`, {
       method: 'POST',
@@ -107,6 +114,9 @@ export async function verifyCode(code: string, ip?: string, userAgent?: string):
         'Content-Type': 'application/json',
         ...(ip ? { 'X-Forwarded-For': ip } : {}),
         ...(userAgent ? { 'User-Agent': userAgent } : {}),
+        ...(visitorId ? { 'X-Visitor-Id': visitorId } : {}),
+        ...(acceptLanguage ? { 'X-Accept-Language': acceptLanguage } : {}),
+        ...(referer ? { 'X-Referer': referer } : {}),
       },
       body: JSON.stringify({ code }),
       cache: 'no-store',

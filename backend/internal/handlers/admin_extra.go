@@ -191,6 +191,107 @@ func (h *AdminExtraHandler) GeoAnalytics(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"days": days, "data": out})
 }
 
+// -------- Analytics: scan trend --------
+
+func (h *AdminExtraHandler) ScanTrend(c *fiber.Ctx) error {
+	days := 30
+	if d := c.Query("days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+
+	rows, err := h.DB.Query(ctx, `
+		SELECT DATE(scanned_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
+		       COUNT(*) AS scans, COUNT(DISTINCT token_id) AS unique_tokens
+		FROM scan_logs
+		WHERE scanned_at > NOW() - make_interval(days => $1)
+		GROUP BY 1
+		ORDER BY 1 ASC
+	`, days)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "query"})
+	}
+	defer rows.Close()
+
+	type row struct {
+		Day          string `json:"day"`
+		Scans        int    `json:"scans"`
+		UniqueTokens int    `json:"unique_tokens"`
+	}
+	out := []row{}
+	for rows.Next() {
+		var r row
+		var day time.Time
+		if err := rows.Scan(&day, &r.Scans, &r.UniqueTokens); err == nil {
+			r.Day = day.Format("2006-01-02")
+			out = append(out, r)
+		}
+	}
+	return c.JSON(fiber.Map{"days": days, "data": out})
+}
+
+// -------- Analytics: device/OS/browser breakdown --------
+
+func (h *AdminExtraHandler) DeviceBreakdown(c *fiber.Ctx) error {
+	days := 30
+	if d := c.Query("days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+
+	rows, err := h.DB.Query(ctx, `
+		SELECT 'device' AS kind, COALESCE(device_type,'Không xác định') AS label, COUNT(*) AS count
+		FROM scan_logs
+		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+		GROUP BY 2
+		UNION ALL
+		SELECT 'os', COALESCE(os_name,'Không xác định'), COUNT(*)
+		FROM scan_logs
+		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+		GROUP BY 2
+		UNION ALL
+		SELECT 'browser', COALESCE(browser_name,'Không xác định'), COUNT(*)
+		FROM scan_logs
+		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+		GROUP BY 2
+		ORDER BY 1, 3 DESC
+	`, days)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "query"})
+	}
+	defer rows.Close()
+
+	type item struct {
+		Label string `json:"label"`
+		Count int    `json:"count"`
+	}
+	devices := []item{}
+	oses := []item{}
+	browsers := []item{}
+	for rows.Next() {
+		var kind string
+		var it item
+		if err := rows.Scan(&kind, &it.Label, &it.Count); err != nil {
+			continue
+		}
+		switch kind {
+		case "device":
+			devices = append(devices, it)
+		case "os":
+			oses = append(oses, it)
+		case "browser":
+			browsers = append(browsers, it)
+		}
+	}
+	return c.JSON(fiber.Map{"days": days, "devices": devices, "os": oses, "browsers": browsers})
+}
+
 // -------- Analytics: summary --------
 
 func (h *AdminExtraHandler) Summary(c *fiber.Ctx) error {

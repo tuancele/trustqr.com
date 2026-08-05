@@ -24,10 +24,7 @@ type QRHandler struct {
 }
 
 type verifyReq struct {
-	Code     string   `json:"code"`
-	Lat      *float64 `json:"lat"`
-	Lng      *float64 `json:"lng"`
-	Accuracy *float64 `json:"accuracy"`
+	Code string `json:"code"`
 }
 
 type verifyResp struct {
@@ -68,6 +65,10 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 	ip := middleware.ClientIP(c)
 	ua := c.Get("User-Agent")
 	city, region, country := h.Geo.Lookup(ip)
+	deviceType, osName, osVersion, browserName, browserVersion := services.ParseUA(ua)
+	visitorID := c.Get("X-Visitor-Id")
+	acceptLanguage := c.Get("X-Accept-Language")
+	referer := c.Get("X-Referer")
 
 	ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
 	defer cancel()
@@ -126,9 +127,16 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_, err := h.DB.Exec(bg, `
-				INSERT INTO scan_logs (token_id, ip_address, user_agent, city, region, country, is_repeat, device_lat, device_lng, device_accuracy)
-				VALUES ($1, $2::inet, $3, $4, $5, $6, $7, $8, $9, $10)
-			`, tokenID, nullIfEmpty(ip), ua, city, region, country, scanCount > 1, req.Lat, req.Lng, req.Accuracy)
+				INSERT INTO scan_logs (
+					token_id, ip_address, user_agent, city, region, country, is_repeat,
+					device_type, os_name, os_version, browser_name, browser_version,
+					visitor_id, accept_language, referer
+				)
+				VALUES ($1, $2::inet, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			`, tokenID, nullIfEmpty(ip), ua, city, region, country, scanCount > 1,
+				nullIfEmpty(deviceType), nullIfEmpty(osName), nullIfEmpty(osVersion),
+				nullIfEmpty(browserName), nullIfEmpty(browserVersion),
+				nullIfEmpty(visitorID), nullIfEmpty(acceptLanguage), nullIfEmpty(referer))
 			if err != nil {
 				log.Printf("scan log insert: %v", err)
 			}
@@ -222,6 +230,55 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		resp.Warning = "Mã này đã bị đánh dấu nghi ngờ. Vui lòng liên hệ nhà sản xuất để xác minh."
 	}
 	return c.JSON(resp)
+}
+
+type enrichReq struct {
+	Code         string   `json:"code"`
+	Lat          *float64 `json:"lat"`
+	Lng          *float64 `json:"lng"`
+	Accuracy     *float64 `json:"accuracy"`
+	ScreenWidth  *int     `json:"screen_width"`
+	ScreenHeight *int     `json:"screen_height"`
+	Timezone     string   `json:"timezone"`
+}
+
+// Enrich attaches best-effort device signals (GPS, screen size, timezone) that only
+// become available client-side after the main render, to the scan_logs row the initial
+// Verify call already created — via UPDATE, never INSERT, so it can never inflate
+// scan_count or create a second log row for the same physical scan.
+func (h *QRHandler) Enrich(c *fiber.Ctx) error {
+	c.Set("Cache-Control", "no-store")
+
+	var req enrichReq
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
+	}
+	if !h.Tokens.Verify(req.Code) {
+		return c.Status(404).JSON(fiber.Map{"error": "invalid_code"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+	defer cancel()
+
+	_, err := h.DB.Exec(ctx, `
+		UPDATE scan_logs SET
+			device_lat = COALESCE(device_lat, $2),
+			device_lng = COALESCE(device_lng, $3),
+			device_accuracy = COALESCE(device_accuracy, $4),
+			screen_width = COALESCE(screen_width, $5),
+			screen_height = COALESCE(screen_height, $6),
+			timezone = COALESCE(timezone, $7)
+		WHERE (id, scanned_at) = (
+			SELECT sl.id, sl.scanned_at FROM scan_logs sl
+			JOIN qr_tokens qt ON qt.id = sl.token_id
+			WHERE qt.secret_code = $1 AND sl.scanned_at > NOW() - INTERVAL '2 minutes'
+			ORDER BY sl.scanned_at DESC LIMIT 1
+		)
+	`, req.Code, req.Lat, req.Lng, req.Accuracy, req.ScreenWidth, req.ScreenHeight, nullIfEmpty(req.Timezone))
+	if err != nil {
+		log.Printf("enrich update: %v", err)
+	}
+	return c.SendStatus(204)
 }
 
 type activateReq struct {
