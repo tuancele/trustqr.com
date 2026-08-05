@@ -1,7 +1,7 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { ShieldCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone } from 'lucide-react';
-import { verifyCode, fetchProduct } from '@/lib/api';
+import { verifyCode, fetchProduct, isAdminSession } from '@/lib/api';
 import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
 import { GeoReporter } from '@/components/GeoReporter';
@@ -17,7 +17,7 @@ export default async function VerifyPage({ params }: { params: { code: string } 
   const ip = h.get('x-forwarded-for') || h.get('x-real-ip') || '';
   const ua = h.get('user-agent') || '';
 
-  if (!isMobileUA(ua)) return <DesktopOnlyView />;
+  if (!isMobileUA(ua) && !(await isAdminSession(h.get('cookie') || ''))) return <DesktopOnlyView />;
 
   const result = await verifyCode(params.code, ip, ua);
 
@@ -54,7 +54,7 @@ export default async function VerifyPage({ params }: { params: { code: string } 
         )}
 
         {/* Verification result */}
-        <ResultCard suspicious={isSuspicious} count={result.scan_count} />
+        <ResultCard count={result.scan_count} />
 
         {/* Product image slider */}
         {product?.images && product.images.length > 0 && <ImageSlider images={product.images} />}
@@ -75,7 +75,7 @@ export default async function VerifyPage({ params }: { params: { code: string } 
             />
           )}
           <InfoRow icon={Clock} label="Số lần quét" value={
-            <span className={isSuspicious ? 'font-bold text-amber-600' : 'font-bold text-emerald-600'}>
+            <span className={isSuspicious ? 'font-bold text-red-600' : 'font-bold text-emerald-600'}>
               {result.scan_count}
             </span>
           } />
@@ -132,44 +132,28 @@ function DesktopOnlyView() {
   );
 }
 
-function ResultCard({ suspicious, count }: { suspicious: boolean; count: number }) {
+function ResultCard({ count }: { count: number }) {
+  const isRepeat = count > 1;
   return (
-    <div className={`rounded-2xl border-2 p-5 shadow-sm ${suspicious ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50'}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 space-y-3 min-w-0">
-          <div>
-            <div className="text-xs text-gray-500">Kết quả</div>
-            <div className={`text-sm font-semibold mt-0.5 ${suspicious ? 'text-amber-800' : 'text-emerald-800'}`}>
-              {suspicious ? 'Mã này đã được quét nhiều lần — có thể là hàng giả.' : 'Sản phẩm này là sản phẩm chính hãng.'}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500">Xác nhận</div>
-            <div className="text-sm font-medium text-gray-900 mt-0.5">
-              Đã xác thực <strong>{count}</strong> lần
-            </div>
-          </div>
-        </div>
-        {suspicious ? <WarningBadge /> : <GenuineBadge />}
+    <div className="rounded-2xl border-2 border-gov-200 bg-white p-4 shadow-sm flex items-center gap-4">
+      <CertifiedBadge />
+      <p className="flex-1 text-sm text-gray-800 leading-relaxed">
+        Sản phẩm này là sản phẩm chính hãng. Mã được xác nhận{' '}
+        <span className={`font-bold ${isRepeat ? 'text-red-600' : 'text-emerald-600'}`}>{count}</span> lần.
+      </p>
+    </div>
+  );
+}
+
+function CertifiedBadge() {
+  return (
+    <div className="flex-shrink-0 relative w-[72px] h-[72px]">
+      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-gov-500 to-gov-700 shadow-md" />
+      <div className="absolute inset-[3px] rounded-full border-2 border-gold-300" />
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+        <ShieldCheck className="w-6 h-6 text-gold-300" strokeWidth={2.5} />
+        <span className="text-[7px] font-bold tracking-wide mt-0.5 leading-none">CHÍNH HÃNG</span>
       </div>
-    </div>
-  );
-}
-
-function GenuineBadge() {
-  return (
-    <div className="flex-shrink-0 flex flex-col items-center justify-center w-20 h-20 rounded-full border-2 border-emerald-500 bg-white">
-      <ShieldCheck className="w-7 h-7 text-emerald-600" strokeWidth={2.5} />
-      <span className="text-[9px] font-bold text-emerald-700 mt-0.5 tracking-wide">CHÍNH HÃNG</span>
-    </div>
-  );
-}
-
-function WarningBadge() {
-  return (
-    <div className="flex-shrink-0 flex flex-col items-center justify-center w-20 h-20 rounded-full border-2 border-amber-500 bg-white">
-      <ShieldAlert className="w-7 h-7 text-amber-600" strokeWidth={2.5} />
-      <span className="text-[9px] font-bold text-amber-700 mt-0.5 tracking-wide">NGHI VẤN</span>
     </div>
   );
 }

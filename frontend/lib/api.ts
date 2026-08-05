@@ -82,6 +82,23 @@ export async function fetchProduct(id: number): Promise<ProductDetail | null> {
   } catch { return null; }
 }
 
+// Recognizes a logged-in admin browser from the mirrored access-token cookie (set by
+// lib/adminApi.ts) so the public /v/[code] desktop gate can be bypassed for developers.
+// Validates the token against the backend rather than trusting the cookie's mere presence.
+export async function isAdminSession(cookieHeader: string): Promise<boolean> {
+  const match = cookieHeader.match(/(?:^|;\s*)trustqr_admin_access=([^;]+)/);
+  if (!match) return false;
+  try {
+    const res = await fetch(`${API_URL}/api/v1/admin/auth/me`, {
+      headers: { Authorization: `Bearer ${decodeURIComponent(match[1])}` },
+      cache: 'no-store',
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function verifyCode(code: string, ip?: string, userAgent?: string): Promise<VerifyResult | null> {
   try {
     const res = await fetch(`${API_URL}/api/v1/qr/verify`, {

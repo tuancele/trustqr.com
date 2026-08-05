@@ -10,14 +10,29 @@ export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// Mirrors the access token into a plain cookie (same exposure as localStorage under XSS,
+// so no security downside) so server components — e.g. the public /v/[code] desktop gate —
+// can recognize a logged-in admin browser and skip the mobile-only restriction for them.
+function setAccessCookie(token: string) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${TOKEN_KEY}=${token}; path=/; max-age=900; samesite=lax`;
+}
+
+function clearAccessCookie() {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
+}
+
 export function setTokens(access: string, refresh: string) {
   localStorage.setItem(TOKEN_KEY, access);
   localStorage.setItem(REFRESH_KEY, refresh);
+  setAccessCookie(access);
 }
 
 export function clearTokens() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_KEY);
+  clearAccessCookie();
 }
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -31,6 +46,7 @@ async function refreshAccessToken(): Promise<string | null> {
   if (!res.ok) return null;
   const data = await res.json();
   localStorage.setItem(TOKEN_KEY, data.access_token);
+  setAccessCookie(data.access_token);
   return data.access_token;
 }
 
