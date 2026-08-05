@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -377,9 +378,14 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 		var r row
 		if err := rows.Scan(&r.ID, &r.ScannedAt, &r.IsRepeat, &r.SecretCode, &r.BatchCode, &r.ProductName,
 			&r.City, &r.Region, &r.Country, &r.DeviceType, &r.OSName, &r.OSVersion,
-			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID); err == nil {
+			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID); err != nil {
+			log.Printf("scan-log row scan: %v", err)
+		} else {
 			out = append(out, r)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("scan-log rows.Err: %v", err)
 	}
 	return c.JSON(fiber.Map{"data": out, "total": total, "page": page, "page_size": pageSize})
 }
