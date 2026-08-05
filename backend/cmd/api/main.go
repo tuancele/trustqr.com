@@ -59,6 +59,9 @@ func main() {
 	if err := os.MkdirAll(cfg.PromoBannerStorageDir, 0755); err != nil {
 		log.Fatalf("promo banner storage dir: %v", err)
 	}
+	if err := os.MkdirAll(cfg.ContentImageStorageDir, 0755); err != nil {
+		log.Fatalf("content image storage dir: %v", err)
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName:            "trustqr-api",
@@ -116,6 +119,7 @@ func main() {
 	companies := &handlers.CompanyHandler{DB: pool, Audit: audit}
 	brands := &handlers.BrandHandler{DB: pool, Audit: audit, StorageDir: cfg.BrandLogoStorageDir}
 	banners := &handlers.PromoBannerHandler{DB: pool, Audit: audit, StorageDir: cfg.PromoBannerStorageDir}
+	contentImages := &handlers.ContentImageHandler{Audit: audit, StorageDir: cfg.ContentImageStorageDir}
 	distributors := &handlers.DistributorHandler{DB: pool, Audit: audit}
 	auth := &handlers.AuthHandler{DB: pool, Auth: authSvc, Audit: audit}
 	customer := &handlers.CustomerHandler{DB: pool, SMS: sms}
@@ -148,6 +152,7 @@ func main() {
 	api.Get("/banners", banners.PublicList)
 	api.Get("/banners/:id/file", banners.ServeImage)
 	api.Get("/brands/:id/logo/file", brands.ServeLogo)
+	api.Get("/content-images/:filename", contentImages.Serve)
 
 	// Customer NĐ13 endpoints
 	api.Post("/customer/deletion-request",
@@ -232,6 +237,9 @@ func main() {
 	protected.Post("/banners", banners.Create)
 	protected.Patch("/banners/:id", banners.Update)
 	protected.Delete("/banners/:id", banners.Delete)
+
+	// Inline content images (rich-text product description editor)
+	protected.Post("/content-images", contentImages.Upload)
 
 	// Distributors CRUD
 	protected.Get("/distributors", distributors.List)

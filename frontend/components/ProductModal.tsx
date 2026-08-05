@@ -105,7 +105,10 @@ export function ProductModal({ productId, onClose }: Props) {
 
               {product.full_description && (
                 <Section title="Mô tả chi tiết" icon={FileText}>
-                  <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed text-left">{product.full_description}</p>
+                  <div
+                    className="text-sm prose-editor text-left"
+                    dangerouslySetInnerHTML={{ __html: product.full_description }}
+                  />
                 </Section>
               )}
 

@@ -8,6 +8,7 @@ import { api, uploadForm } from '@/lib/adminApi';
 import { PageHeader, Alert } from '@/components/ui';
 import { CompanyPicker, type Company } from '@/components/CompanyPicker';
 import { BrandPicker, type Brand } from '@/components/BrandPicker';
+import { RichTextEditor } from '@/components/RichTextEditor';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -139,9 +140,9 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
           </Field>
 
           <Field label="Mô tả chi tiết">
-            <textarea
-              value={data.full_description || ''} onChange={(e) => set('full_description', e.target.value)}
-              className="form-input min-h-[120px]"
+            <RichTextEditor
+              value={data.full_description || ''}
+              onChange={(html) => set('full_description', html)}
               placeholder="Thông tin đầy đủ về công dụng, ưu điểm..."
             />
           </Field>

@@ -198,6 +198,7 @@ func (h *ProductHandler) Create(c *fiber.Ctx) error {
 	if b.Name == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "name_required"})
 	}
+	b.FullDescription = sanitizeDescriptionHTML(b.FullDescription)
 	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
 	active := true
 	if b.IsActive != nil {
@@ -237,6 +238,7 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 	if err := c.BodyParser(&b); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
 	}
+	b.FullDescription = sanitizeDescriptionHTML(b.FullDescription)
 	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
 	active := true
 	if b.IsActive != nil {

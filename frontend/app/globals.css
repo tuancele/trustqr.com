@@ -80,6 +80,14 @@ html { scroll-behavior: smooth; }
   .badge-danger  { @apply badge bg-red-50 text-red-700 border border-red-200; }
   .badge-info    { @apply badge bg-gov-50 text-gov-700 border border-gov-100; }
   .badge-muted   { @apply badge bg-gray-100 text-gray-600 border border-gray-200; }
+
+  /* Rich-text content (product full_description): shared by the admin
+     editor and the public product modal so both render identically. */
+  .prose-editor { @apply text-gray-700 leading-relaxed; }
+  .prose-editor p { @apply mb-2 last:mb-0; }
+  .prose-editor ul { @apply list-disc pl-5 mb-2 last:mb-0; }
+  .prose-editor ol { @apply list-decimal pl-5 mb-2 last:mb-0; }
+  .prose-editor img { @apply max-w-full rounded-lg my-2; }
 }
 
 /* Scrollbar */
