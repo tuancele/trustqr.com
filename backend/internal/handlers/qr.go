@@ -218,9 +218,6 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 	if voucher != nil {
 		resp.Voucher = *voucher
 	}
-	if scanCount > 1 {
-		resp.Warning = "Mã QR này đã được quét trước đó. Có thể là hàng nhái sao chép tem."
-	}
 	if status == "flagged" || status == "disabled" {
 		resp.Warning = "Mã này đã bị đánh dấu nghi ngờ. Vui lòng liên hệ nhà sản xuất để xác minh."
 	}
