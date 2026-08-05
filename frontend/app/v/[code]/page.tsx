@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
-import { BadgeCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone } from 'lucide-react';
+import { BadgeCheck, ShieldAlert, ShieldX, ShieldQuestion, Package as PackageIcon, Hash, Clock, Ticket, Info, Smartphone, Tag } from 'lucide-react';
 import { verifyCode, fetchProduct, fetchPromoBanners, isAdminSession } from '@/lib/api';
 import ActivateForm from '@/components/ActivateForm';
 import { ProductNameButton } from '@/components/ProductNameButton';
@@ -85,6 +85,19 @@ export default async function VerifyPage({ params }: { params: { code: string } 
             label="Sản phẩm"
             value={<ProductNameButton productId={result.product_id} productName={result.product_name || '—'} />}
           />
+          {result.brand_name && (
+            <InfoRow
+              icon={Tag}
+              label="Thương hiệu"
+              value={
+                result.brand_website ? (
+                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-gov-700 hover:underline font-semibold">
+                    {result.brand_name}
+                  </a>
+                ) : result.brand_name
+              }
+            />
+          )}
           {result.company_name && (
             <InfoRow
               icon={PackageIcon}
@@ -156,7 +169,7 @@ function ResultCard({ count }: { count: number }) {
     <div className="rounded-2xl border-2 border-gov-200 bg-white p-4 shadow-sm flex items-center gap-4">
       <CertifiedBadge />
       <p className="flex-1 text-sm text-gray-800 leading-relaxed">
-        Sản phẩm này là sản phẩm chính hãng. Mã được xác nhận{' '}
+        Sản phẩm này là sản phẩm chính hãng. Mã QR này đã được xác nhận{' '}
         <span className={`font-bold ${isRepeat ? 'text-red-600' : 'text-emerald-600'}`}>{count}</span> lần.
       </p>
     </div>
@@ -277,11 +290,11 @@ function InvalidView() {
 
 function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-1.5 border-b border-gray-100 last:border-0">
+    <div className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
       <Icon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0 flex justify-between items-baseline gap-3">
-        <span className="text-xs text-gray-500">{label}</span>
-        <span className="text-sm text-gray-900 text-right">{value}</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs text-gray-500">{label}</div>
+        <div className="text-sm text-gray-900 mt-0.5 break-words">{value}</div>
       </div>
     </div>
   );

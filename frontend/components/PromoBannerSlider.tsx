@@ -20,15 +20,17 @@ export function PromoBannerSlider({ banners }: { banners: PromoBanner[] }) {
 
   if (banners.length === 0) return null;
 
+  // No fixed aspect ratio: the frame sizes itself to each banner's natural
+  // dimensions instead of cropping it via object-cover.
   const slide = (
-    <img src={banners[index].url} alt="" className="w-full h-full object-cover" />
+    <img src={banners[index].url} alt="" className="w-full h-auto block" />
   );
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-sm">
-      <div className="relative aspect-[16/7] bg-gray-100">
+      <div className="relative bg-gray-100">
         {banners[index].link_url ? (
-          <a href={banners[index].link_url!} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+          <a href={banners[index].link_url!} target="_blank" rel="noopener noreferrer" className="block">
             {slide}
           </a>
         ) : slide}
