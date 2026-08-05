@@ -27,29 +27,27 @@ export function PromoBannerSlider({ banners }: { banners: PromoBanner[] }) {
   );
 
   return (
-    <div className="rounded-2xl overflow-hidden shadow-sm">
-      <div className="relative bg-gray-100">
+    <div className="overflow-hidden shadow-sm">
+      <div className="bg-gray-100">
         {banners[index].link_url ? (
           <a href={banners[index].link_url!} target="_blank" rel="noopener noreferrer" className="block">
             {slide}
           </a>
         ) : slide}
-        {banners.length > 1 && (
-          <div className="absolute bottom-2 inset-x-0 flex items-center justify-center pointer-events-none">
-            <div className="flex items-center gap-1.5 bg-black/25 backdrop-blur-sm rounded-full px-2.5 py-1.5">
-              {banners.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setIndex(i)}
-                  aria-label={`Banner ${i + 1}`}
-                  className={`w-1.5 h-1.5 rounded-full transition-colors pointer-events-auto ${i === index ? 'bg-white' : 'bg-white/50'}`}
-                />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
+      {banners.length > 1 && (
+        <div className="flex items-center justify-center gap-1.5 pt-2">
+          {banners.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setIndex(i)}
+              aria-label={`Banner ${i + 1}`}
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${i === index ? 'bg-gov-500' : 'bg-gray-300'}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

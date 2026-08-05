@@ -290,12 +290,12 @@ function InvalidView() {
 
 function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
-      <Icon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs text-gray-500">{label}</div>
-        <div className="text-sm text-gray-900 mt-0.5 break-words">{value}</div>
+    <div className="py-2.5 border-b border-gray-100 last:border-0">
+      <div className="flex items-center gap-1.5 text-gray-400">
+        <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+        <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
       </div>
+      <div className="text-sm font-semibold text-gray-900 mt-1 break-words">{value}</div>
     </div>
   );
 }
