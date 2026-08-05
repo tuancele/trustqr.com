@@ -10,17 +10,28 @@ export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// trustqr.com and www.trustqr.com are served by the same app with no redirect between
+// them, so a host-only cookie set on one wouldn't be visible on the other. Scoping the
+// cookie to the apex domain (dropping a "www." prefix) shares it across both. Falls back
+// to host-only on localhost/IP dev environments, where a domain attribute would be rejected.
+function cookieDomainAttr(): string {
+  if (typeof location === 'undefined') return '';
+  const host = location.hostname;
+  if (host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return '';
+  return `; domain=${host.replace(/^www\./, '')}`;
+}
+
 // Mirrors the access token into a plain cookie (same exposure as localStorage under XSS,
 // so no security downside) so server components — e.g. the public /v/[code] desktop gate —
 // can recognize a logged-in admin browser and skip the mobile-only restriction for them.
 function setAccessCookie(token: string) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${TOKEN_KEY}=${token}; path=/; max-age=900; samesite=lax`;
+  document.cookie = `${TOKEN_KEY}=${token}; path=/; max-age=900; samesite=lax${cookieDomainAttr()}`;
 }
 
 function clearAccessCookie() {
   if (typeof document === 'undefined') return;
-  document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
+  document.cookie = `${TOKEN_KEY}=; path=/; max-age=0${cookieDomainAttr()}`;
 }
 
 export function setTokens(access: string, refresh: string) {
