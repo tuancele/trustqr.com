@@ -1,11 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ProductImage } from '@/lib/api';
 
+const AUTOPLAY_MS = 2500;
+
 export function ImageSlider({ images }: { images: ProductImage[] }) {
   const [index, setIndex] = useState(0);
+
+  // Restarting on every index change (manual or auto) keeps the interval
+  // from firing right after a user just clicked/tapped to a slide.
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const timer = setInterval(() => {
+      setIndex((i) => (i + 1) % images.length);
+    }, AUTOPLAY_MS);
+    return () => clearInterval(timer);
+  }, [index, images.length]);
+
   if (images.length === 0) return null;
 
   const prev = () => setIndex((i) => (i - 1 + images.length) % images.length);
