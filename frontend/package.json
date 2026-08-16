@@ -13,6 +13,7 @@
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "bwip-js": "^4.11.2",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "next": "14.2.15",

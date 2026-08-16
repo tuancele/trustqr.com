@@ -78,6 +78,9 @@ type productBody struct {
 	LicenseNumber     string `json:"license_number"`
 	Barcode           string `json:"barcode"`
 	GTIN              string `json:"gtin"`
+	ProductCode       string `json:"product_code"`
+	Spec              string `json:"spec"`
+	Unit              string `json:"unit"`
 	ImageURL          string `json:"image_url"`
 	IsActive          *bool  `json:"is_active"`
 }
@@ -141,38 +144,43 @@ func (h *ProductHandler) Get(c *fiber.Ctx) error {
 	defer cancel()
 
 	var p struct {
-		ID                int64      `json:"id"`
-		Name              string     `json:"name"`
-		ShortDescription  *string    `json:"short_description"`
-		FullDescription   *string    `json:"full_description"`
-		Ingredients       *string    `json:"ingredients"`
-		UsageInstructions *string    `json:"usage_instructions"`
-		Warnings          *string    `json:"warnings"`
-		CompanyID         *int64     `json:"company_id"`
-		BrandID           *int64     `json:"brand_id"`
-		ImporterCompany   *string    `json:"importer_company"`
-		ImporterAddress   *string    `json:"importer_address"`
-		ImporterPhone     *string    `json:"importer_phone"`
-		OriginCountry     *string    `json:"origin_country"`
-		Volume            *string    `json:"volume"`
-		LicenseNumber     *string    `json:"license_number"`
-		Barcode           *string    `json:"barcode"`
-		GTIN              *string    `json:"gtin"`
-		ImageURL          *string    `json:"image_url"`
-		IsActive          bool       `json:"is_active"`
-		CreatedAt         time.Time  `json:"created_at"`
-		UpdatedAt         time.Time  `json:"updated_at"`
+		ID                int64             `json:"id"`
+		Name              string            `json:"name"`
+		ShortDescription  *string           `json:"short_description"`
+		FullDescription   *string           `json:"full_description"`
+		Ingredients       *string           `json:"ingredients"`
+		UsageInstructions *string           `json:"usage_instructions"`
+		Warnings          *string           `json:"warnings"`
+		CompanyID         *int64            `json:"company_id"`
+		BrandID           *int64            `json:"brand_id"`
+		ImporterCompany   *string           `json:"importer_company"`
+		ImporterAddress   *string           `json:"importer_address"`
+		ImporterPhone     *string           `json:"importer_phone"`
+		OriginCountry     *string           `json:"origin_country"`
+		Volume            *string           `json:"volume"`
+		LicenseNumber     *string           `json:"license_number"`
+		Barcode           *string           `json:"barcode"`
+		GTIN              *string           `json:"gtin"`
+		ProductCode       *string           `json:"product_code"`
+		Spec              *string           `json:"spec"`
+		Unit              *string           `json:"unit"`
+		ImageURL          *string           `json:"image_url"`
+		IsActive          bool              `json:"is_active"`
+		CreatedAt         time.Time         `json:"created_at"`
+		UpdatedAt         time.Time         `json:"updated_at"`
 		Images            []productImageOut `json:"images"`
 	}
 	err = h.DB.QueryRow(ctx, `
 		SELECT id, name, short_description, full_description, ingredients,
 		       usage_instructions, warnings, company_id, brand_id, importer_company, importer_address,
-		       importer_phone, origin_country, volume, license_number, barcode, gtin, image_url,
+		       importer_phone, origin_country, volume, license_number, barcode, gtin,
+		       product_code, spec, unit, image_url,
 		       is_active, created_at, updated_at
 		FROM products WHERE id = $1
 	`, id).Scan(&p.ID, &p.Name, &p.ShortDescription, &p.FullDescription, &p.Ingredients,
 		&p.UsageInstructions, &p.Warnings, &p.CompanyID, &p.BrandID, &p.ImporterCompany, &p.ImporterAddress,
-		&p.ImporterPhone, &p.OriginCountry, &p.Volume, &p.LicenseNumber, &p.Barcode, &p.GTIN, &p.ImageURL,
+		&p.ImporterPhone, &p.OriginCountry, &p.Volume, &p.LicenseNumber, &p.Barcode, &p.GTIN,
+		&p.ProductCode, &p.Spec, &p.Unit, &p.ImageURL,
 		&p.IsActive, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -212,12 +220,13 @@ func (h *ProductHandler) Create(c *fiber.Ctx) error {
 	err := h.DB.QueryRow(ctx, `
 		INSERT INTO products (name, short_description, full_description, ingredients,
 			usage_instructions, warnings, company_id, brand_id, importer_company, importer_address, importer_phone,
-			origin_country, volume, license_number, barcode, gtin, image_url, is_active, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			origin_country, volume, license_number, barcode, gtin, product_code, spec, unit, image_url, is_active, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 		RETURNING id
 	`, b.Name, b.ShortDescription, b.FullDescription, b.Ingredients,
 		b.UsageInstructions, b.Warnings, b.CompanyID, b.BrandID, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
-		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ImageURL, active, nullIfZeroInt64(adminID)).Scan(&id)
+		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ProductCode, b.Spec, b.Unit,
+		b.ImageURL, active, nullIfZeroInt64(adminID)).Scan(&id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -253,11 +262,12 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 			name = $1, short_description = $2, full_description = $3, ingredients = $4,
 			usage_instructions = $5, warnings = $6, company_id = $7, brand_id = $8, importer_company = $9, importer_address = $10,
 			importer_phone = $11, origin_country = $12, volume = $13, license_number = $14,
-			barcode = $15, gtin = $16, image_url = $17, is_active = $18
-		WHERE id = $19
+			barcode = $15, gtin = $16, product_code = $17, spec = $18, unit = $19, image_url = $20, is_active = $21
+		WHERE id = $22
 	`, b.Name, b.ShortDescription, b.FullDescription, b.Ingredients,
 		b.UsageInstructions, b.Warnings, b.CompanyID, b.BrandID, b.ImporterCompany, b.ImporterAddress, b.ImporterPhone,
-		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ImageURL, active, id)
+		b.OriginCountry, b.Volume, b.LicenseNumber, b.Barcode, b.GTIN, b.ProductCode, b.Spec, b.Unit,
+		b.ImageURL, active, id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}

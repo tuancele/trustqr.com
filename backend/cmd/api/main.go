@@ -126,6 +126,7 @@ func main() {
 	templates := &handlers.TemplateHandler{DB: pool, Audit: audit, StorageDir: cfg.TemplateStorageDir}
 	labelExport := &handlers.LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	adminUsers := &handlers.AdminUserHandler{DB: pool, Auth: authSvc, Audit: audit}
+	gs1Label := &handlers.GS1LabelHandler{DB: pool}
 
 	api := app.Group("/api/v1")
 
@@ -205,6 +206,7 @@ func main() {
 	protected.Get("/tokens/:code/trace", admin.GetTokenTrace)
 	protected.Get("/tokens/:code/qr.png", admin.GetQRImage)
 	protected.Patch("/tokens/:id/disable", adminExtra.DisableToken)
+	protected.Get("/tokens/:id/gs1-data", gs1Label.GetTokenGS1Data)
 
 	protected.Post("/boxes", adminExtra.AssignBox)
 

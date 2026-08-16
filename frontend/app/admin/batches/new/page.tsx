@@ -15,6 +15,8 @@ export default function NewBatchPage() {
   const [product, setProduct] = useState<any>(null);
   const [quantity, setQuantity] = useState(100);
   const [notes, setNotes] = useState('');
+  const [manufactureDate, setManufactureDate] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +32,8 @@ export default function NewBatchPage() {
         product_id: product?.id || 0,
         quantity,
         notes,
+        manufacture_date: manufactureDate,
+        expiry_date: expiryDate,
       }),
     });
     setLoading(false);
@@ -119,6 +123,26 @@ export default function NewBatchPage() {
             Tối đa <strong>1.000.000</strong> tem/lô. Sinh 100.000 tem mất ~30 giây.
           </p>
         </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="form-label">Ngày sản xuất <span className="text-gray-400 font-normal">(tùy chọn)</span></label>
+            <input
+              type="date" value={manufactureDate} onChange={(e) => setManufactureDate(e.target.value)}
+              className="form-input"
+            />
+          </div>
+          <div>
+            <label className="form-label">Hạn sử dụng <span className="text-gray-400 font-normal">(tùy chọn)</span></label>
+            <input
+              type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)}
+              className="form-input"
+            />
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 -mt-2">
+          2 trường này dùng cho module mã GS1 DataMatrix (AI 11/17). Có thể bổ sung sau ở trang chi tiết lô.
+        </p>
 
         <div>
           <label className="form-label">Ghi chú <span className="text-gray-400 font-normal">(tùy chọn)</span></label>

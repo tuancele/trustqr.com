@@ -23,18 +23,21 @@ func (h *AdminHandler) GetBatchDetail(c *fiber.Ctx) error {
 	defer cancel()
 
 	var b struct {
-		ID          int64     `json:"id"`
-		BatchCode   string    `json:"batch_code"`
-		ProductID   *int64    `json:"default_product_id"`
-		ProductName *string   `json:"default_product_name"`
-		TotalQty    int       `json:"total_qty"`
-		Notes       *string   `json:"notes"`
-		CreatedAt   time.Time `json:"created_at"`
+		ID              int64      `json:"id"`
+		BatchCode       string     `json:"batch_code"`
+		ProductID       *int64     `json:"default_product_id"`
+		ProductName     *string    `json:"default_product_name"`
+		TotalQty        int        `json:"total_qty"`
+		Notes           *string    `json:"notes"`
+		ManufactureDate *time.Time `json:"manufacture_date"`
+		ExpiryDate      *time.Time `json:"expiry_date"`
+		CreatedAt       time.Time  `json:"created_at"`
 	}
 	err = h.DB.QueryRow(ctx, `
-		SELECT id, batch_code, product_id, product_name, total_qty, notes, created_at
+		SELECT id, batch_code, product_id, product_name, total_qty, notes, manufacture_date, expiry_date, created_at
 		FROM batches WHERE id=$1
-	`, id).Scan(&b.ID, &b.BatchCode, &b.ProductID, &b.ProductName, &b.TotalQty, &b.Notes, &b.CreatedAt)
+	`, id).Scan(&b.ID, &b.BatchCode, &b.ProductID, &b.ProductName, &b.TotalQty, &b.Notes,
+		&b.ManufactureDate, &b.ExpiryDate, &b.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
@@ -91,12 +94,12 @@ func (h *AdminHandler) GetBatchDetail(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"batch": b,
 		"summary": fiber.Map{
-			"total":     b.TotalQty,
-			"assigned":  assigned,
+			"total":      b.TotalQty,
+			"assigned":   assigned,
 			"unassigned": b.TotalQty - assigned,
-			"ready":     ready,
-			"activated": activated,
-			"scanned":   scanned,
+			"ready":      ready,
+			"activated":  activated,
+			"scanned":    scanned,
 		},
 		"assignments": assignments,
 	})
@@ -104,8 +107,10 @@ func (h *AdminHandler) GetBatchDetail(c *fiber.Ctx) error {
 
 // UpdateBatch allows editing batch_code, notes (not qty since tokens exist).
 type updateBatchReq struct {
-	BatchCode string `json:"batch_code"`
-	Notes     string `json:"notes"`
+	BatchCode       string `json:"batch_code"`
+	Notes           string `json:"notes"`
+	ManufactureDate string `json:"manufacture_date"` // "YYYY-MM-DD"
+	ExpiryDate      string `json:"expiry_date"`      // "YYYY-MM-DD"
 }
 
 func (h *AdminHandler) UpdateBatch(c *fiber.Ctx) error {
@@ -123,8 +128,10 @@ func (h *AdminHandler) UpdateBatch(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
-	tag, err := h.DB.Exec(ctx, `UPDATE batches SET batch_code=$1, notes=$2 WHERE id=$3`,
-		req.BatchCode, req.Notes, id)
+	tag, err := h.DB.Exec(ctx, `
+		UPDATE batches SET batch_code=$1, notes=$2, manufacture_date=NULLIF($3,'')::DATE, expiry_date=NULLIF($4,'')::DATE
+		WHERE id=$5`,
+		req.BatchCode, req.Notes, req.ManufactureDate, req.ExpiryDate, id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
