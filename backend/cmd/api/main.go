@@ -126,6 +126,8 @@ func main() {
 	templates := &handlers.TemplateHandler{DB: pool, Audit: audit, StorageDir: cfg.TemplateStorageDir}
 	labelExport := &handlers.LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	adminUsers := &handlers.AdminUserHandler{DB: pool, Auth: authSvc, Audit: audit}
+	gs1Label := &handlers.GS1LabelHandler{DB: pool}
+	gs1LabelExport := &handlers.GS1LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 
 	api := app.Group("/api/v1")
 
@@ -207,6 +209,16 @@ func main() {
 	protected.Patch("/tokens/:id/disable", adminExtra.DisableToken)
 
 	protected.Post("/boxes", adminExtra.AssignBox)
+
+	// GS1 DataMatrix module — standalone admin section (/admin/gs1), fully
+	// independent of the QR-token batches/tokens flow above: every field is
+	// typed in by the admin, nothing is looked up from those tables.
+	protected.Post("/gs1/labels", gs1Label.CreateLabel)
+	protected.Get("/gs1/labels", gs1Label.ListLabels)
+	protected.Get("/gs1/labels/:id", gs1Label.GetLabel)
+	protected.Delete("/gs1/labels/:id", gs1Label.DeleteLabel)
+	protected.Post("/gs1/labels/:id/export-labels.pdf", gs1LabelExport.ExportPDF)
+	protected.Post("/gs1/labels/:id/export-labels-svg.zip", gs1LabelExport.ExportSVGZip)
 
 	// Products CRUD
 	protected.Get("/products", products.List)

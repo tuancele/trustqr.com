@@ -52,15 +52,17 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 }
 
 // RenderTiledPDF builds a print-ready PDF with one page per sheet, tiling the
-// template image with a QR code composited at (qrXRatio,qrYRatio) with a
+// template image with a barcode image composited at (qrXRatio,qrYRatio) with a
 // square side of (qrSizeRatio * labelW) — a fraction of labelW, matching the
 // same fixed-square QR box used everywhere else — into every grid cell, one
-// cell per token.
+// cell per token. imageFn supplies the PNG bytes to place for each token,
+// which lets callers plug in QR codes, GS1 DataMatrix, or any other raster
+// barcode without duplicating the tiling/pagination logic.
 //
 // The template image is registered once with fpdf and reused for every cell/page
 // (fpdf embeds identically-named images only once), so PDF size and memory stay
-// roughly proportional to the number of *distinct* QR codes, not the page count.
-func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, qrPixelSize int) ([]byte, error) {
+// roughly proportional to the number of *distinct* barcode images, not the page count.
+func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -111,9 +113,9 @@ func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, l
 
 		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
 
-		qrPNG, err := GenerateQRPNG(tok.URL, qrPixelSize)
+		qrPNG, err := imageFn(tok)
 		if err != nil {
-			return nil, fmt.Errorf("generate qr for %s: %w", tok.Code, err)
+			return nil, fmt.Errorf("generate image for %s: %w", tok.Code, err)
 		}
 		qrName := "qr_" + tok.Code
 		pdf.RegisterImageOptionsReader(qrName, qrOpts, bytes.NewReader(qrPNG))

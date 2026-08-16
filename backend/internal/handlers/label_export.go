@@ -169,7 +169,8 @@ func (h *LabelExportHandler) ExportLabelsPDF(c *fiber.Ctx) error {
 		tpl.FilePath, tpl.FileType,
 		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
-		tokens, b.QRPx,
+		tokens,
+		func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) },
 	)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
