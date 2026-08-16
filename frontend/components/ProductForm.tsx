@@ -35,9 +35,6 @@ export interface ProductData {
   license_number?: string | null;
   barcode?: string | null;
   gtin?: string | null;
-  product_code?: string | null;
-  spec?: string | null;
-  unit?: string | null;
   image_url?: string | null;
   images?: ProductImageItem[];
   is_active?: boolean;
@@ -239,30 +236,6 @@ export function ProductForm({ productId, initial }: { productId?: number; initia
           </div>
           <p className="text-xs text-gray-500 -mt-2">
             Barcode dùng cho POS truyền thống, GTIN dùng cho chuỗi cung ứng quốc tế (GS1). Cả 2 có thể để trống nếu chưa có.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Field label="Mã sản phẩm">
-              <input
-                value={data.product_code || ''} onChange={(e) => set('product_code', e.target.value)}
-                className="form-input font-mono" placeholder="C010400955"
-              />
-            </Field>
-            <Field label="Quy cách">
-              <input
-                value={data.spec || ''} onChange={(e) => set('spec', e.target.value)}
-                className="form-input font-mono" placeholder="FXS4508"
-              />
-            </Field>
-            <Field label="Đơn vị">
-              <input
-                value={data.unit || ''} onChange={(e) => set('unit', e.target.value)}
-                className="form-input" placeholder="Cái"
-              />
-            </Field>
-          </div>
-          <p className="text-xs text-gray-500 -mt-2">
-            3 trường này cùng GTIN ở trên dùng để sinh mã GS1 DataMatrix (module chống giả riêng, xem ở trang chi tiết lô).
           </p>
         </Section>
 

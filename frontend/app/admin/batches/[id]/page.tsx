@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Package, ArrowLeft, Download, FileArchive, Edit3, Loader2, Layers,
   ShieldCheck, CheckCircle2, XCircle, Truck, Zap, ChevronLeft, ChevronRight,
-  Printer, FileImage, Settings2, ExternalLink, QrCode, X,
+  Printer, FileImage, Settings2, ExternalLink,
 } from 'lucide-react';
 import { api, download, downloadPost } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert, StatCard, StatusBadge, EmptyState } from '@/components/ui';
@@ -686,7 +686,6 @@ function TokensTab({ batchId }: { batchId: number }) {
   const [filter, setFilter] = useState('');
   const [data, setData] = useState<{ tokens: Token[]; total: number; page: number; page_size: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [gs1TokenId, setGs1TokenId] = useState<number | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -738,7 +737,6 @@ function TokensTab({ batchId }: { batchId: number }) {
                     <th className="px-3 py-2">Kích hoạt</th>
                     <th className="px-3 py-2">Trạng thái</th>
                     <th className="px-3 py-2 text-right">Scans</th>
-                    <th className="px-3 py-2 text-right">GS1</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -753,15 +751,6 @@ function TokensTab({ batchId }: { batchId: number }) {
                       </td>
                       <td className="px-3 py-2"><StatusBadge status={t.status} /></td>
                       <td className="px-3 py-2 text-right text-xs">{t.scan_count}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          onClick={() => setGs1TokenId(t.id)}
-                          title="Xem mã GS1 DataMatrix"
-                          className="inline-flex items-center gap-1 text-xs text-gov-600 hover:text-gov-700 hover:underline"
-                        >
-                          <QrCode className="w-3.5 h-3.5" /> Xem
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -782,90 +771,6 @@ function TokensTab({ batchId }: { batchId: number }) {
           </div>
         </>
       )}
-
-      {gs1TokenId !== null && (
-        <GS1LabelModal tokenId={gs1TokenId} onClose={() => setGs1TokenId(null)} />
-      )}
     </div>
-  );
-}
-
-// ============ GS1 DataMatrix preview/download modal ============
-const GS1_ERROR_LABELS: Record<string, string> = {
-  product_gtin_missing: 'Sản phẩm gán cho tem này chưa có GTIN — bổ sung ở trang Sản phẩm (mục "Mã định danh sản phẩm").',
-  batch_manufacture_date_missing: 'Lô này chưa có ngày sản xuất — bổ sung ở tab Tổng quan hoặc khi tạo lô.',
-  not_found: 'Không tìm thấy tem này.',
-};
-
-function GS1LabelModal({ tokenId, onClose }: { tokenId: number; onClose: () => void }) {
-  const [data, setData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setData(null);
-    api<any>(`/api/v1/admin/tokens/${tokenId}/gs1-data`).then((r) => {
-      if (r.ok && r.data) setData(r.data);
-      else setError(GS1_ERROR_LABELS[r.error || ''] || r.error || 'Không lấy được dữ liệu GS1');
-      setLoading(false);
-    });
-  }, [tokenId]);
-
-  const imgSrc = data ? `/api/gs1-datamatrix?data=${encodeURIComponent(data.element_string)}&scale=8` : null;
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-900">Mã GS1 DataMatrix — Tem #{tokenId}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {loading && <Spinner />}
-        {error && <Alert kind="danger">{error}</Alert>}
-
-        {data && (
-          <div className="space-y-4">
-            <div className="flex justify-center bg-gray-50 rounded-lg p-4 border border-gray-100">
-              <img src={imgSrc!} alt="GS1 DataMatrix" className="w-48 h-48" />
-            </div>
-            <div className="text-xs font-mono bg-gray-50 rounded p-2 break-all text-gray-600">
-              {data.element_string}
-            </div>
-            <table className="w-full text-xs">
-              <tbody className="divide-y divide-gray-100">
-                <GS1Row label="GTIN (01)" value={data.gtin} mono />
-                <GS1Row label="Ngày SX (11)" value={data.manufacture_date} mono />
-                <GS1Row label="HSD (17)" value={data.expiry_date} mono />
-                <GS1Row label="Lô (10)" value={data.lot} mono />
-                <GS1Row label="Serial (21)" value={data.serial} mono />
-                <GS1Row label="Sản phẩm" value={data.product_name} />
-              </tbody>
-            </table>
-            <a
-              href={imgSrc!}
-              download={`gs1_token_${tokenId}.png`}
-              className="btn-primary w-full justify-center"
-            >
-              <Download className="w-4 h-4" /> Tải PNG
-            </a>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GS1Row({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
-  if (!value) return null;
-  return (
-    <tr>
-      <td className="py-1.5 pr-3 text-gray-500 whitespace-nowrap align-top">{label}</td>
-      <td className={`py-1.5 text-gray-900 break-all ${mono ? 'font-mono' : ''}`}>{value}</td>
-    </tr>
   );
 }

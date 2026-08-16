@@ -23,13 +23,11 @@ type AdminHandler struct {
 }
 
 type createBatchReq struct {
-	BatchCode       string `json:"batch_code"`
-	ProductID       int64  `json:"product_id"`
-	ProductName     string `json:"product_name"` // legacy — ignored if ProductID > 0
-	Quantity        int    `json:"quantity"`
-	Notes           string `json:"notes"`
-	ManufactureDate string `json:"manufacture_date"` // "YYYY-MM-DD", used by the GS1 DataMatrix module (AI 11)
-	ExpiryDate      string `json:"expiry_date"`      // "YYYY-MM-DD", optional (AI 17)
+	BatchCode   string `json:"batch_code"`
+	ProductID   int64  `json:"product_id"`
+	ProductName string `json:"product_name"` // legacy — ignored if ProductID > 0
+	Quantity    int    `json:"quantity"`
+	Notes       string `json:"notes"`
 }
 
 type createBatchResp struct {
@@ -76,9 +74,9 @@ func (h *AdminHandler) CreateBatch(c *fiber.Ctx) error {
 
 	var batchID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO batches (batch_code, product_id, product_name, total_qty, notes, manufacture_date, expiry_date)
-		VALUES ($1, NULLIF($2, 0)::BIGINT, NULLIF($3, ''), $4, $5, NULLIF($6, '')::DATE, NULLIF($7, '')::DATE) RETURNING id
-	`, req.BatchCode, req.ProductID, productName, req.Quantity, req.Notes, req.ManufactureDate, req.ExpiryDate).Scan(&batchID)
+		INSERT INTO batches (batch_code, product_id, product_name, total_qty, notes)
+		VALUES ($1, NULLIF($2, 0)::BIGINT, NULLIF($3, ''), $4, $5) RETURNING id
+	`, req.BatchCode, req.ProductID, productName, req.Quantity, req.Notes).Scan(&batchID)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
