@@ -18,11 +18,13 @@ export function CopySecurityCode({
     }
   }
 
+  const formattedCode = code.match(/.{1,4}/g)?.join('-') ?? code;
+
   return (
     <div className="card px-4 py-2.5 flex flex-col items-center text-center gap-0.5">
       <span className="text-[10px] text-gray-500">{label}</span>
       <div className="flex items-center gap-1.5">
-        <span className="font-mono font-semibold text-sm text-gov-700 tracking-wide whitespace-nowrap">{code}</span>
+        <span className="font-mono font-semibold text-sm text-gov-700 tracking-wide whitespace-nowrap">{formattedCode}</span>
         <button
           type="button"
           onClick={copy}

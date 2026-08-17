@@ -1,6 +1,7 @@
 import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock } from 'lucide-react';
 import { verifyGS1Code } from '@/lib/api';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
+import { GtinHelp } from '@/components/GtinHelp';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -29,8 +30,8 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
   const isSuspicious = result.scan_count > 1 || !!result.warning;
 
   return (
-    <main className="min-h-screen bg-slate-50 py-8 px-4">
-      <div className="fixed top-0 inset-x-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 z-10" />
+    <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 py-8 px-4">
+      <div className="fixed top-0 inset-x-0 h-1.5 bg-gradient-to-r from-gov-500 via-gold-400 to-gov-500 z-10" />
 
       <div className="max-w-md mx-auto">
         <div className="text-center mb-6">
@@ -40,17 +41,17 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
                 href={result.brand_website}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden"
+                className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-gov-100 mb-3 overflow-hidden"
               >
                 <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
               </a>
             ) : (
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-gov-100 mb-3 overflow-hidden">
                 <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
               </div>
             )
           ) : (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gov-600 rounded-2xl shadow-lg ring-4 ring-gov-100 mb-3">
               <ShieldCheck className="w-9 h-9 text-white" strokeWidth={2} />
             </div>
           )}
@@ -58,11 +59,11 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           <p className="text-xs text-slate-500 mt-1">TrustQR GS1 Verification</p>
         </div>
 
-        <div className="rounded-2xl border-2 border-emerald-200 bg-white p-4 shadow-sm flex items-center gap-4">
-          <img src="/trusted-brand-badge.svg" alt="Trusted Brand" className="flex-shrink-0 w-12 h-12" />
+        <div className="rounded-2xl border-2 border-gov-200 bg-white p-4 shadow-sm flex items-center gap-4">
+          <CertifiedBadge />
           <p className="flex-1 text-sm text-slate-700 leading-relaxed">
-            This product is <span className="font-semibold text-emerald-700">genuine</span>. This code has been verified{' '}
-            <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-emerald-600'}`}>{result.scan_count}</span> time
+            This product is <span className="font-semibold text-gov-700">genuine</span>. This code has been verified{' '}
+            <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-gov-600'}`}>{result.scan_count}</span> time
             {result.scan_count === 1 ? '' : 's'}.
           </p>
         </div>
@@ -87,8 +88,8 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           </div>
         )}
 
-        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Product Information</h2>
+        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
+          <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Product Information</h2>
           <InfoRow icon={PackageIcon} label="Product Name" value={result.product_name || '—'} />
           {result.product_code && <InfoRow icon={Hash} label="Product Code" value={result.product_code} />}
           {result.spec && <InfoRow icon={Layers} label="Specification" value={result.spec} />}
@@ -100,7 +101,7 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
               label="Brand"
               value={
                 result.brand_website ? (
-                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-emerald-600 hover:underline font-semibold underline-offset-2">
+                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-gov-600 hover:underline font-semibold underline-offset-2">
                     {result.brand_name}
                   </a>
                 ) : result.brand_name
@@ -110,21 +111,21 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           {result.origin_country && <InfoRow icon={MapPin} label="Origin" value={result.origin_country} />}
         </div>
 
-        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Traceability (GS1)</h2>
-          <InfoRow icon={Tag} label="GTIN" value={<span className="font-mono">{result.gtin || '—'}</span>} />
+        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
+          <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Traceability (GS1)</h2>
+          <InfoRow icon={Tag} label="GTIN" value={<span className="font-mono inline-flex items-center gap-1.5">{result.gtin || '—'}<GtinHelp /></span>} />
           <InfoRow icon={Hash} label="Lot / Batch" value={<span className="font-mono">{result.lot || '—'}</span>} />
           <InfoRow icon={Hash} label="Serial Number" value={<span className="font-mono">{result.serial || '—'}</span>} />
           <InfoRow icon={Calendar} label="Manufacture Date" value={fmtDateEN(result.manufacture_date)} />
           {result.expiry_date && <InfoRow icon={Calendar} label="Expiry Date" value={fmtDateEN(result.expiry_date)} />}
         </div>
 
-        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Scan History</h2>
+        <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
+          <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Scan History</h2>
           <InfoRow
             icon={Repeat}
             label="Total Scans"
-            value={<span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-emerald-600'}`}>{result.scan_count}</span>}
+            value={<span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-gov-600'}`}>{result.scan_count}</span>}
           />
           {result.first_scanned_at && (
             <InfoRow icon={Clock} label="First Scanned" value={fmtDateTimeEN(result.first_scanned_at)} />
@@ -142,9 +143,17 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
   );
 }
 
+function CertifiedBadge() {
+  return (
+    <div className="flex-shrink-0 w-[72px] h-[72px]">
+      <img src="/verified-shield-badge.png" alt="Verified genuine" className="w-full h-full object-contain" />
+    </div>
+  );
+}
+
 function InvalidView() {
   return (
-    <main className="min-h-screen bg-red-50 py-8 px-4 flex items-center">
+    <main className="min-h-screen bg-gradient-to-br from-red-50 via-white to-red-100 py-8 px-4 flex items-center">
       <div className="fixed top-0 inset-x-0 h-1.5 bg-red-500 z-10" />
       <div className="max-w-md mx-auto text-center">
         <div className="inline-flex items-center justify-center w-20 h-20 bg-red-500 rounded-2xl shadow-lg mb-4">
