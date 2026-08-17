@@ -188,6 +188,7 @@ export async function submitGS1Order(payload: {
   code: string;
   customer_name: string;
   phone: string;
+  address: string;
   items: { size_spec_id: number; quantity: number }[];
 }): Promise<{ ok: boolean; error?: string }> {
   const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -198,7 +199,7 @@ export async function submitGS1Order(payload: {
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      let msg = 'Có lỗi xảy ra, vui lòng thử lại.';
+      let msg = 'Something went wrong. Please try again.';
       try {
         const d = await res.json();
         msg = d?.error || msg;
@@ -209,7 +210,7 @@ export async function submitGS1Order(payload: {
     }
     return { ok: true };
   } catch {
-    return { ok: false, error: 'Không thể kết nối máy chủ.' };
+    return { ok: false, error: 'Could not connect to the server.' };
   }
 }
 

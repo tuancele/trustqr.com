@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ShoppingBag, Phone, User, Building2, ChevronDown, ChevronUp, Trash2,
+  ShoppingBag, Phone, User, Building2, MapPin, ChevronDown, ChevronUp, Trash2,
   Inbox, Loader2, Package, Clock,
 } from 'lucide-react';
 import { api } from '@/lib/adminApi';
@@ -15,6 +15,7 @@ interface OrderRow {
   brand_name: string;
   customer_name: string;
   phone: string;
+  address: string | null;
   status: string;
   note: string | null;
   item_count: number;
@@ -190,6 +191,12 @@ function OrderCard({
                 )}
                 <span>{fmtDateTime(order.created_at)}</span>
               </div>
+              {order.address && (
+                <p className="flex items-start gap-1 text-xs text-gray-500 mt-1">
+                  <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                  <span className="line-clamp-2">{order.address}</span>
+                </p>
+              )}
             </div>
           </div>
         </div>

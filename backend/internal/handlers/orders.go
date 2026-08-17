@@ -94,6 +94,7 @@ type publicOrderBody struct {
 	Code         string                `json:"code"`
 	CustomerName string                `json:"customer_name"`
 	Phone        string                `json:"phone"`
+	Address      string                `json:"address"`
 	Items        []publicOrderItemBody `json:"items"`
 }
 
@@ -104,10 +105,11 @@ func (h *OrderHandler) CreatePublic(c *fiber.Ctx) error {
 	}
 	b.CustomerName = strings.TrimSpace(b.CustomerName)
 	b.Phone = strings.TrimSpace(b.Phone)
-	if b.CustomerName == "" || b.Phone == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "name_and_phone_required"})
+	b.Address = strings.TrimSpace(b.Address)
+	if b.CustomerName == "" || b.Phone == "" || b.Address == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "name_phone_address_required"})
 	}
-	if len(b.CustomerName) > 150 || len(b.Phone) > 30 {
+	if len(b.CustomerName) > 150 || len(b.Phone) > 30 || len(b.Address) > 300 {
 		return c.Status(400).JSON(fiber.Map{"error": "field_too_long"})
 	}
 	if len(b.Items) == 0 || len(b.Items) > 50 {
@@ -130,9 +132,9 @@ func (h *OrderHandler) CreatePublic(c *fiber.Ctx) error {
 
 	var orderID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO orders (brand_id, label_id, customer_name, phone)
-		VALUES ($1,$2,$3,$4) RETURNING id
-	`, brandID, labelID, b.CustomerName, b.Phone).Scan(&orderID)
+		INSERT INTO orders (brand_id, label_id, customer_name, phone, address)
+		VALUES ($1,$2,$3,$4,$5) RETURNING id
+	`, brandID, labelID, b.CustomerName, b.Phone, b.Address).Scan(&orderID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
@@ -179,6 +181,7 @@ type orderRow struct {
 	BrandName    string    `json:"brand_name"`
 	CustomerName string    `json:"customer_name"`
 	Phone        string    `json:"phone"`
+	Address      *string   `json:"address"`
 	Status       string    `json:"status"`
 	Note         *string   `json:"note"`
 	ItemCount    int       `json:"item_count"`
@@ -192,7 +195,7 @@ func (h *OrderHandler) List(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT o.id, o.brand_id, COALESCE(b.name,''), o.customer_name, o.phone, o.status, o.note,
+		SELECT o.id, o.brand_id, COALESCE(b.name,''), o.customer_name, o.phone, o.address, o.status, o.note,
 		       COUNT(oi.id), COALESCE(SUM(oi.quantity),0), o.created_at
 		FROM orders o
 		LEFT JOIN brands b ON b.id = o.brand_id
@@ -210,7 +213,7 @@ func (h *OrderHandler) List(c *fiber.Ctx) error {
 	out := []orderRow{}
 	for rows.Next() {
 		var r orderRow
-		if err := rows.Scan(&r.ID, &r.BrandID, &r.BrandName, &r.CustomerName, &r.Phone, &r.Status, &r.Note,
+		if err := rows.Scan(&r.ID, &r.BrandID, &r.BrandName, &r.CustomerName, &r.Phone, &r.Address, &r.Status, &r.Note,
 			&r.ItemCount, &r.TotalQty, &r.CreatedAt); err == nil {
 			out = append(out, r)
 		}
@@ -241,10 +244,10 @@ func (h *OrderHandler) Get(c *fiber.Ctx) error {
 
 	var d orderDetail
 	err = h.DB.QueryRow(ctx, `
-		SELECT o.id, o.brand_id, COALESCE(b.name,''), o.customer_name, o.phone, o.status, o.note, o.created_at
+		SELECT o.id, o.brand_id, COALESCE(b.name,''), o.customer_name, o.phone, o.address, o.status, o.note, o.created_at
 		FROM orders o LEFT JOIN brands b ON b.id = o.brand_id
 		WHERE o.id = $1
-	`, id).Scan(&d.ID, &d.BrandID, &d.BrandName, &d.CustomerName, &d.Phone, &d.Status, &d.Note, &d.CreatedAt)
+	`, id).Scan(&d.ID, &d.BrandID, &d.BrandName, &d.CustomerName, &d.Phone, &d.Address, &d.Status, &d.Note, &d.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "not_found"})

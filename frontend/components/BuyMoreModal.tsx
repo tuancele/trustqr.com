@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ShoppingCart, X, Plus, Minus, Loader2, CheckCircle2, PackageSearch } from 'lucide-react';
+import { ShoppingCart, X, Plus, Minus, Loader2, CheckCircle2, PackageSearch, ArrowLeft, ArrowRight } from 'lucide-react';
 import { fetchGS1OrderSizes, submitGS1Order, type OrderSizeOption } from '@/lib/api';
+
+// 16px input font-size prevents iOS Safari from auto-zooming the page on focus.
+const FIELD_CLASS =
+  'mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-base focus:border-gov-400 focus:ring-1 focus:ring-gov-400 outline-none';
 
 export function BuyMoreButton({ code }: { code: string }) {
   const [open, setOpen] = useState(false);
@@ -21,15 +25,20 @@ export function BuyMoreButton({ code }: { code: string }) {
   );
 }
 
+type Step = 'sizes' | 'details' | 'done';
+
 function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [options, setOptions] = useState<OrderSizeOption[]>([]);
   const [qty, setQty] = useState<Record<number, number>>({});
+  const [step, setStep] = useState<Step>('sizes');
+
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +68,7 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
   }
 
   const selectedCount = Object.keys(qty).length;
+  const selectedItems = options.filter((o) => qty[o.id]);
 
   const grouped = options.reduce<Record<string, OrderSizeOption[]>>((acc, o) => {
     const key = o.product_line || 'Other';
@@ -66,25 +76,45 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
     return acc;
   }, {});
 
-  async function submit() {
-    setError(null);
-    if (!name.trim() || !phone.trim()) {
-      setError('Please enter your name and phone number.');
-      return;
-    }
+  function goToDetails() {
     if (selectedCount === 0) {
       setError('Please select at least one product size.');
       return;
     }
+    setError(null);
+    setStep('details');
+  }
+
+  async function submit() {
+    setError(null);
+    if (!name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
+    if (!digits) {
+      setError('Please enter your phone number.');
+      return;
+    }
+    if (!address.trim()) {
+      setError('Please enter a delivery address.');
+      return;
+    }
     setSubmitting(true);
     const items = Object.entries(qty).map(([id, quantity]) => ({ size_spec_id: Number(id), quantity }));
-    const r = await submitGS1Order({ code, customer_name: name.trim(), phone: phone.trim(), items });
+    const r = await submitGS1Order({
+      code,
+      customer_name: name.trim(),
+      phone: `+84${digits}`,
+      address: address.trim(),
+      items,
+    });
     setSubmitting(false);
     if (!r.ok) {
       setError(r.error || 'Something went wrong. Please try again.');
       return;
     }
-    setDone(true);
+    setStep('done');
   }
 
   return (
@@ -95,6 +125,11 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
           <div className="flex items-center gap-2">
             <ShoppingCart className="w-4 h-4 text-gov-600" />
             <h2 className="font-bold text-gray-900">Buy more</h2>
+            {step !== 'done' && (
+              <span className="text-xs text-gray-400 font-medium">
+                Step {step === 'sizes' ? '1' : '2'} of 2
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -107,12 +142,12 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
         </div>
 
         <div className="overflow-y-auto px-5 py-4 space-y-4 flex-1">
-          {done ? (
+          {step === 'done' ? (
             <div className="text-center py-8">
               <div className="w-14 h-14 mx-auto rounded-full bg-emerald-50 flex items-center justify-center mb-3">
                 <CheckCircle2 className="w-7 h-7 text-emerald-600" />
               </div>
-              <p className="font-semibold text-gray-900">Order received!</p>
+              <p className="font-semibold text-gray-900">Thank you for your order!</p>
               <p className="text-sm text-gray-500 mt-1">We will contact you shortly to confirm your order.</p>
             </div>
           ) : loading ? (
@@ -125,29 +160,8 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
               <PackageSearch className="w-8 h-8 mx-auto text-gray-300 mb-2" />
               No products available for order yet. Please contact the manufacturer directly.
             </div>
-          ) : (
+          ) : step === 'sizes' ? (
             <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-500">Full name</label>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Dr. ..."
-                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-gov-400 focus:ring-1 focus:ring-gov-400 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500">Phone number</label>
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="09xxxxxxxx"
-                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-gov-400 focus:ring-1 focus:ring-gov-400 outline-none"
-                  />
-                </div>
-              </div>
-
               <div>
                 <p className="text-xs font-medium text-gray-500 mb-2">Select product size(s)</p>
                 <div className="space-y-3">
@@ -206,19 +220,91 @@ function BuyMoreModal({ code, onClose }: { code: string; onClose: () => void }) 
 
               {error && <p className="text-sm text-red-600">{error}</p>}
             </>
+          ) : (
+            <>
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Your order</p>
+                <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">
+                  {selectedItems.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between px-3 py-1.5 text-sm">
+                      <span className="text-gray-700 truncate">{o.spec}</span>
+                      <span className="font-semibold text-gov-700 flex-shrink-0 ml-2">x{qty[o.id]}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500">Full name</label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Dr. ..."
+                  className={FIELD_CLASS}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500">Phone number</label>
+                <div className="mt-1 flex items-stretch rounded-lg border border-gray-200 focus-within:border-gov-400 focus-within:ring-1 focus-within:ring-gov-400 overflow-hidden">
+                  <span className="flex items-center px-3 text-base font-medium text-gray-500 bg-gray-50 border-r border-gray-200 flex-shrink-0">
+                    +84
+                  </span>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="912345678"
+                    inputMode="tel"
+                    className="w-full px-3 py-2.5 text-base outline-none min-w-0"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500">Delivery address</label>
+                <textarea
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Clinic / hospital address"
+                  rows={2}
+                  className={`${FIELD_CLASS} resize-none`}
+                />
+              </div>
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+            </>
           )}
         </div>
 
-        {!done && !loading && options.length > 0 && (
-          <div className="px-5 py-4 border-t border-gray-100 flex-shrink-0">
+        {!loading && options.length > 0 && step !== 'done' && (
+          <div className="px-5 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
+            {step === 'details' && (
+              <button
+                type="button"
+                onClick={() => setStep('sizes')}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+            )}
             <button
               type="button"
-              onClick={submit}
+              onClick={step === 'sizes' ? goToDetails : submit}
               disabled={submitting}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gov-600 hover:bg-gov-700 disabled:opacity-60 text-white font-semibold text-sm transition-colors"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gov-600 hover:bg-gov-700 disabled:opacity-60 text-white font-semibold text-sm transition-colors"
             >
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
-              Buy{selectedCount > 0 ? ` (${selectedCount} item${selectedCount > 1 ? 's' : ''})` : ''}
+              {step === 'sizes' ? (
+                <>
+                  Next{selectedCount > 0 ? ` (${selectedCount} item${selectedCount > 1 ? 's' : ''})` : ''}
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              ) : (
+                <>
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+                  Place order
+                </>
+              )}
             </button>
           </div>
         )}
