@@ -33,9 +33,10 @@ type gs1LabelReq struct {
 	GTIN            string `json:"gtin"`
 	ManufactureDate string `json:"manufacture_date"` // "YYYY-MM-DD"
 	ExpiryDate      string `json:"expiry_date"`      // "YYYY-MM-DD", optional
-	Lot             string `json:"lot"`
-	Serial          string `json:"serial"`        // full serial; used as-is by UpdateLabel
-	SerialPrefix    string `json:"serial_prefix"` // 3-char admin-entered prefix; CreateLabel appends 7 auto-generated chars
+	Lot             string `json:"lot"`              // full lot; used as-is by UpdateLabel
+	LotPrefix       string `json:"lot_prefix"`       // 3-char admin-entered prefix; CreateLabel appends 8 auto-generated chars
+	Serial          string `json:"serial"`           // full serial; used as-is by UpdateLabel
+	SerialPrefix    string `json:"serial_prefix"`    // 3-char admin-entered prefix; CreateLabel appends 7 auto-generated chars
 	ProductName     string `json:"product_name"`
 	ProductCode     string `json:"product_code"`
 	Spec            string `json:"spec"`
@@ -127,6 +128,16 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
 	}
+
+	lotPrefix := strings.ToUpper(strings.TrimSpace(req.LotPrefix))
+	if !serialPrefixRe.MatchString(lotPrefix) {
+		return c.Status(400).JSON(fiber.Map{"error": "lot_prefix_invalid"})
+	}
+	lotSuffix, err := generateSerialSuffix(8)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "lot_gen_failed"})
+	}
+	req.Lot = lotPrefix + lotSuffix
 
 	prefix := strings.ToUpper(strings.TrimSpace(req.SerialPrefix))
 	if !serialPrefixRe.MatchString(prefix) {

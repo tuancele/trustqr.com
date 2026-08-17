@@ -14,12 +14,13 @@ interface SizeSpec {
   spec: string;
   size_spec: string | null;
   gtin: string | null;
+  product_code: string | null;
   product_line: string | null;
   verified: boolean;
   created_at: string;
 }
 
-const emptyForm = { spec: '', size_spec: '', gtin: '', product_line: '', verified: false };
+const emptyForm = { spec: '', size_spec: '', gtin: '', product_code: '', product_line: '', verified: false };
 
 export default function SizesPage() {
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -48,6 +49,7 @@ export default function SizesPage() {
     ? items.filter((i) =>
         i.spec.toLowerCase().includes(q.toLowerCase()) ||
         (i.gtin || '').includes(q) ||
+        (i.product_code || '').toLowerCase().includes(q.toLowerCase()) ||
         (i.product_line || '').toLowerCase().includes(q.toLowerCase()) ||
         (i.size_spec || '').toLowerCase().includes(q.toLowerCase()))
     : items;
@@ -106,6 +108,7 @@ export default function SizesPage() {
                       <th className="px-4 py-3">Brand / Line</th>
                       <th className="px-4 py-3">Kích thước</th>
                       <th className="px-4 py-3">GTIN</th>
+                      <th className="px-4 py-3">Mã sản phẩm</th>
                       <th className="px-4 py-3">Xác minh</th>
                       <th className="px-4 py-3">Thao tác</th>
                     </tr>
@@ -142,7 +145,7 @@ function Row({ item, onDelete, onSaved }: { item: SizeSpec; onDelete: () => void
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     spec: item.spec, size_spec: item.size_spec || '', gtin: item.gtin || '',
-    product_line: item.product_line || '', verified: item.verified,
+    product_code: item.product_code || '', product_line: item.product_line || '', verified: item.verified,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +184,10 @@ function Row({ item, onDelete, onSaved }: { item: SizeSpec; onDelete: () => void
             className="form-input font-mono text-xs" />
         </td>
         <td className="px-4 py-2">
+          <input value={form.product_code} onChange={(e) => setForm((f) => ({ ...f, product_code: e.target.value }))}
+            className="form-input font-mono text-xs" />
+        </td>
+        <td className="px-4 py-2">
           <label className="inline-flex items-center gap-1.5 text-xs text-gray-700">
             <input type="checkbox" checked={form.verified}
               onChange={(e) => setForm((f) => ({ ...f, verified: e.target.checked }))} />
@@ -210,6 +217,7 @@ function Row({ item, onDelete, onSaved }: { item: SizeSpec; onDelete: () => void
       <td className="px-4 py-3 text-xs text-gray-700">{item.product_line || <em className="text-gray-400">chưa nhập</em>}</td>
       <td className="px-4 py-3 text-xs text-gray-700">{item.size_spec || <em className="text-gray-400">chưa nhập</em>}</td>
       <td className="px-4 py-3 font-mono text-xs text-gov-700">{item.gtin || <em className="text-gray-400 font-sans">chưa có</em>}</td>
+      <td className="px-4 py-3 font-mono text-xs text-gray-700">{item.product_code || <em className="text-gray-400 font-sans">chưa nhập</em>}</td>
       <td className="px-4 py-3"><VerifiedBadge verified={item.verified} /></td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-1.5">
@@ -261,7 +269,7 @@ function EditForm({ brandId, onSaved }: { brandId: number; onSaved: () => void }
         <h3 className="font-semibold text-gray-900 text-sm">Thêm Quy cách</h3>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div>
           <label className="form-label">Quy cách <span className="text-red-500">*</span></label>
           <input value={form.spec} onChange={(e) => set('spec', e.target.value)}
@@ -281,6 +289,11 @@ function EditForm({ brandId, onSaved }: { brandId: number; onSaved: () => void }
           <label className="form-label">GTIN</label>
           <input value={form.gtin} onChange={(e) => set('gtin', e.target.value)}
             placeholder="08809460304718" className="form-input font-mono" />
+        </div>
+        <div>
+          <label className="form-label">Mã sản phẩm</label>
+          <input value={form.product_code} onChange={(e) => set('product_code', e.target.value)}
+            placeholder="C010400955" className="form-input font-mono" />
         </div>
       </div>
 

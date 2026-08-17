@@ -16,6 +16,7 @@ interface SizeSpec {
   spec: string;
   size_spec: string | null;
   gtin: string | null;
+  product_code: string | null;
   product_line: string | null;
   verified: boolean;
 }
@@ -43,6 +44,8 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
   expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
   lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
+  lot_prefix_invalid: 'Tiền tố lô phải gồm đúng 3 ký tự chữ/số (A-Z, 0-9).',
+  lot_gen_failed: 'Không tạo được lô, thử lại.',
   serial_prefix_invalid: 'Tiền tố serial phải gồm đúng 3 ký tự chữ/số (A-Z, 0-9).',
   serial_gen_failed: 'Không tạo được serial, thử lại.',
   not_found: 'Không tìm thấy mã này.',
@@ -176,10 +179,11 @@ export default function GS1LabelsPage() {
 
 // ============ Create form ============
 const emptyForm = {
-  gtin: '', manufacture_date: '', expiry_date: '', lot: '', serial_prefix: '',
+  gtin: '', manufacture_date: '', expiry_date: '', lot_prefix: '', serial_prefix: '',
   product_name: '', product_code: '', spec: '', size_spec: '', unit: '', manufacturer: '', origin_country: '',
 };
 const SERIAL_PREFIX_RE = /^[A-Z0-9]{3}$/;
+const LOT_PREFIX_RE = /^[A-Z0-9]{3}$/;
 
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState(emptyForm);
@@ -208,6 +212,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       spec: chosen.spec,
       size_spec: chosen.size_spec || f.size_spec,
       gtin: chosen.gtin || f.gtin,
+      product_code: chosen.product_code || f.product_code,
     }));
   }
 
@@ -215,8 +220,12 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     e.preventDefault();
     setError(null);
     setCreatedSerial(null);
-    if (!form.gtin || !form.manufacture_date || !form.lot || !form.serial_prefix) {
-      setError('Cần nhập GTIN, ngày sản xuất, lô và tiền tố serial.');
+    if (!form.gtin || !form.manufacture_date || !form.lot_prefix || !form.serial_prefix) {
+      setError('Cần nhập GTIN, ngày sản xuất, tiền tố lô và tiền tố serial.');
+      return;
+    }
+    if (!LOT_PREFIX_RE.test(form.lot_prefix)) {
+      setError(GS1_ERROR_LABELS.lot_prefix_invalid);
       return;
     }
     if (!SERIAL_PREFIX_RE.test(form.serial_prefix)) {
@@ -256,9 +265,11 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           <input type="date" value={form.expiry_date} onChange={(e) => set('expiry_date', e.target.value)}
             className="form-input" />
         </Field>
-        <Field label="Lot / Batch number (AI 10)" required>
-          <input value={form.lot} onChange={(e) => set('lot', e.target.value)}
-            placeholder="R02511110020" className="form-input font-mono" />
+        <Field label="Lot / Batch number (AI 10) — nhập 3 ký tự đầu" required>
+          <input value={form.lot_prefix}
+            onChange={(e) => set('lot_prefix', e.target.value.toUpperCase().slice(0, 3))}
+            placeholder="R02" maxLength={3} className="form-input font-mono uppercase" />
+          <p className="text-xs text-gray-400 mt-1">Hệ thống tự sinh thêm 8 ký tự phía sau, ví dụ: R02511110020</p>
         </Field>
         <Field label="Serial number (AI 21) — nhập 3 ký tự đầu" required>
           <input value={form.serial_prefix}

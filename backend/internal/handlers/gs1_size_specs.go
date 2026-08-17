@@ -24,6 +24,7 @@ type gs1SizeSpecBody struct {
 	Spec        string `json:"spec"`
 	SizeSpec    string `json:"size_spec"`
 	GTIN        string `json:"gtin"`
+	ProductCode string `json:"product_code"`
 	ProductLine string `json:"product_line"`
 	Verified    bool   `json:"verified"`
 }
@@ -34,6 +35,7 @@ type gs1SizeSpecRow struct {
 	Spec        string    `json:"spec"`
 	SizeSpec    *string   `json:"size_spec"`
 	GTIN        *string   `json:"gtin"`
+	ProductCode *string   `json:"product_code"`
 	ProductLine *string   `json:"product_line"`
 	Verified    bool      `json:"verified"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -48,7 +50,7 @@ func (h *GS1SizeSpecHandler) List(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT id, brand_id, spec, size_spec, gtin, product_line, verified, created_at
+		SELECT id, brand_id, spec, size_spec, gtin, product_code, product_line, verified, created_at
 		FROM gs1_size_specs WHERE brand_id = $1 ORDER BY product_line ASC NULLS LAST, spec ASC`, brandID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "query"})
@@ -58,7 +60,7 @@ func (h *GS1SizeSpecHandler) List(c *fiber.Ctx) error {
 	out := []gs1SizeSpecRow{}
 	for rows.Next() {
 		var r gs1SizeSpecRow
-		if err := rows.Scan(&r.ID, &r.BrandID, &r.Spec, &r.SizeSpec, &r.GTIN, &r.ProductLine, &r.Verified, &r.CreatedAt); err == nil {
+		if err := rows.Scan(&r.ID, &r.BrandID, &r.Spec, &r.SizeSpec, &r.GTIN, &r.ProductCode, &r.ProductLine, &r.Verified, &r.CreatedAt); err == nil {
 			out = append(out, r)
 		}
 	}
@@ -80,9 +82,9 @@ func (h *GS1SizeSpecHandler) Create(c *fiber.Ctx) error {
 
 	var id int64
 	err := h.DB.QueryRow(ctx, `
-		INSERT INTO gs1_size_specs (brand_id, spec, size_spec, gtin, product_line, verified)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
-	`, b.BrandID, b.Spec, nullIfEmpty(b.SizeSpec), nullIfEmpty(b.GTIN), nullIfEmpty(b.ProductLine), b.Verified).Scan(&id)
+		INSERT INTO gs1_size_specs (brand_id, spec, size_spec, gtin, product_code, product_line, verified)
+		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id
+	`, b.BrandID, b.Spec, nullIfEmpty(b.SizeSpec), nullIfEmpty(b.GTIN), nullIfEmpty(b.ProductCode), nullIfEmpty(b.ProductLine), b.Verified).Scan(&id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -108,8 +110,8 @@ func (h *GS1SizeSpecHandler) Update(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 	tag, err := h.DB.Exec(ctx, `
-		UPDATE gs1_size_specs SET spec=$1, size_spec=$2, gtin=$3, product_line=$4, verified=$5 WHERE id=$6
-	`, b.Spec, nullIfEmpty(b.SizeSpec), nullIfEmpty(b.GTIN), nullIfEmpty(b.ProductLine), b.Verified, id)
+		UPDATE gs1_size_specs SET spec=$1, size_spec=$2, gtin=$3, product_code=$4, product_line=$5, verified=$6 WHERE id=$7
+	`, b.Spec, nullIfEmpty(b.SizeSpec), nullIfEmpty(b.GTIN), nullIfEmpty(b.ProductCode), nullIfEmpty(b.ProductLine), b.Verified, id)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
