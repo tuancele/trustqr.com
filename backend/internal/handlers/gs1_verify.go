@@ -72,7 +72,8 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	defer cancel()
 
 	var (
-		id              int64
+		unitID          int64
+		labelID         int64
 		gtin            string
 		manufactureDate time.Time
 		expiryDate      *time.Time
@@ -90,18 +91,14 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		status          string
 	)
 	err := h.DB.QueryRow(ctx, `
-		UPDATE gs1_labels
+		UPDATE gs1_label_units
 		SET scan_count = scan_count + 1,
 		    first_scanned_at = COALESCE(first_scanned_at, NOW()),
 		    first_scan_city  = COALESCE(first_scan_city, $2),
 		    first_scan_ip    = COALESCE(first_scan_ip, $3::inet)
 		WHERE verify_code = $1
-		RETURNING id, gtin, manufacture_date, expiry_date, lot, serial,
-		          product_name, product_code, spec, unit, manufacturer, origin_country,
-		          scan_count, first_scanned_at, COALESCE(first_scan_city,''), status
-	`, req.Code, city, nullIfEmpty(ip)).Scan(&id, &gtin, &manufactureDate, &expiryDate, &lot, &serial,
-		&productName, &productCode, &spec, &unit, &manufacturer, &originCountry,
-		&scanCount, &firstScannedAt, &firstScanCity, &status)
+		RETURNING id, label_id, scan_count, first_scanned_at, COALESCE(first_scan_city,''), status
+	`, req.Code, city, nullIfEmpty(ip)).Scan(&unitID, &labelID, &scanCount, &firstScannedAt, &firstScanCity, &status)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -111,16 +108,27 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "internal"})
 	}
 
+	err = h.DB.QueryRow(ctx, `
+		SELECT gtin, manufacture_date, expiry_date, lot, serial,
+		       product_name, product_code, spec, unit, manufacturer, origin_country
+		FROM gs1_labels WHERE id = $1
+	`, labelID).Scan(&gtin, &manufactureDate, &expiryDate, &lot, &serial,
+		&productName, &productCode, &spec, &unit, &manufacturer, &originCountry)
+	if err != nil {
+		log.Printf("gs1 verify label lookup error: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "internal"})
+	}
+
 	go func() {
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := h.DB.Exec(bg, `
-			INSERT INTO gs1_scan_logs (
-				label_id, ip_address, user_agent, city, region, country, is_repeat,
+			INSERT INTO gs1_unit_scan_logs (
+				unit_id, ip_address, user_agent, city, region, country, is_repeat,
 				device_type, os_name, os_version, browser_name, browser_version
 			)
 			VALUES ($1, $2::inet, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		`, id, nullIfEmpty(ip), ua, city, region, country, scanCount > 1,
+		`, unitID, nullIfEmpty(ip), ua, city, region, country, scanCount > 1,
 			nullIfEmpty(deviceType), nullIfEmpty(osName), nullIfEmpty(osVersion),
 			nullIfEmpty(browserName), nullIfEmpty(browserVersion))
 		if err != nil {

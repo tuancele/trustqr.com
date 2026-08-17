@@ -18,10 +18,10 @@ import (
 	"trustqr/backend/internal/services"
 )
 
-// maxGS1ExportCopies bounds how many repeated copies of one label a single
-// print export can produce — this module has no serial-range concept
-// (GS1 labels are entered individually), so quantity stands in for it.
-const maxGS1ExportCopies = 500
+// maxGS1ExportCopies bounds how many physical stickers a single print export
+// can generate for one label — the admin prints 500-1000 units per lot, each
+// carrying its own unique verify code (mirrors maxExportTokens for batches).
+const maxGS1ExportCopies = 1000
 
 type GS1LabelExportHandler struct {
 	DB            *pgxpool.Pool
@@ -45,25 +45,49 @@ func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (servic
 	return f, nil
 }
 
-// loadOrCreateVerifyCode fetches the label's verification token, generating
-// and persisting one on the fly for rows created before verify_code existed
-// (same backfill pattern as GS1LabelHandler.GetLabel).
-func (h *GS1LabelExportHandler) loadOrCreateVerifyCode(ctx context.Context, id int64) (string, error) {
-	var verifyCode *string
-	if err := h.DB.QueryRow(ctx, `SELECT verify_code FROM gs1_labels WHERE id = $1`, id).Scan(&verifyCode); err != nil {
-		return "", err
-	}
-	if verifyCode != nil {
-		return *verifyCode, nil
-	}
-	vc, err := h.Tokens.Generate()
+// createGS1Units generates `quantity` brand-new physical-sticker rows for a
+// label — each gets its own unique verify_code, mirroring how CreateBatch
+// bulk-inserts unique qr_tokens. Every export call is treated as its own
+// print run, so codes are never reused or topped-up across exports.
+func (h *GS1LabelExportHandler) createGS1Units(ctx context.Context, labelID int64, quantity int) ([]services.LabelToken, error) {
+	tx, err := h.DB.Begin(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if _, err := h.DB.Exec(ctx, `UPDATE gs1_labels SET verify_code=$1 WHERE id=$2`, vc, id); err != nil {
-		return "", err
+	defer tx.Rollback(ctx)
+
+	var maxSerial int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(serial_no), 0) FROM gs1_label_units WHERE label_id = $1`, labelID).Scan(&maxSerial); err != nil {
+		return nil, err
 	}
-	return vc, nil
+
+	tokens := make([]services.LabelToken, quantity)
+	rows := make([][]any, quantity)
+	for i := 0; i < quantity; i++ {
+		code, err := h.Tokens.Generate()
+		if err != nil {
+			return nil, err
+		}
+		serial := maxSerial + i + 1
+		tokens[i] = services.LabelToken{
+			Code: code,
+			URL:  fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, code),
+		}
+		rows[i] = []any{labelID, code, serial, "active"}
+	}
+
+	if _, err := tx.CopyFrom(ctx,
+		pgx.Identifier{"gs1_label_units"},
+		[]string{"label_id", "verify_code", "serial_no", "status"},
+		pgx.CopyFromRows(rows),
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return tokens, nil
 }
 
 type gs1PDFExportBody struct {
@@ -150,21 +174,9 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
 	}
 
-	verifyCode, err := h.loadOrCreateVerifyCode(ctx, id)
+	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
-	}
-	composite, err := services.ComposeGS1LabelImage(dmPNG, fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, verifyCode))
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
-	}
-
-	// Same composite image for every copy — imageFn ignores the token and
-	// returns the pre-fetched bytes; Code just needs to be unique per cell
-	// so fpdf doesn't collide image names across copies.
-	tokens := make([]services.LabelToken, b.Quantity)
-	for i := range tokens {
-		tokens[i] = services.LabelToken{Code: fmt.Sprintf("gs1_%d_copy%d", id, i+1)}
+		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
 	pdfBytes, err := services.RenderTiledPDF(
@@ -172,7 +184,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 		tokens,
-		func(services.LabelToken) ([]byte, error) { return composite, nil },
+		func(tok services.LabelToken) ([]byte, error) { return services.ComposeGS1LabelImage(dmPNG, tok.URL) },
 	)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
@@ -250,18 +262,9 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
 	}
 
-	verifyCode, err := h.loadOrCreateVerifyCode(ctx, id)
+	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
-	}
-	composite, err := services.ComposeGS1LabelImage(dmPNG, fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, verifyCode))
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
-	}
-
-	out, err := services.InjectQRIntoSVG(svgBytes, composite, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
+		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
 	var buf bytes.Buffer
@@ -269,16 +272,24 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 
 	manifestBuf := &bytes.Buffer{}
 	cw := csv.NewWriter(manifestBuf)
-	cw.Write([]string{"filename", "gtin", "lot", "serial", "element_string"})
+	cw.Write([]string{"filename", "verify_code", "gtin", "lot", "serial", "element_string"})
 
-	for i := 1; i <= b.Quantity; i++ {
-		filename := fmt.Sprintf("labels/gs1_%d_copy%d.svg", id, i)
+	for i, tok := range tokens {
+		composite, err := services.ComposeGS1LabelImage(dmPNG, tok.URL)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
+		}
+		out, err := services.InjectQRIntoSVG(svgBytes, composite, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
+		}
+		filename := fmt.Sprintf("labels/gs1_%d_copy%d.svg", id, i+1)
 		fw, err := zw.Create(filename)
 		if err != nil {
 			continue
 		}
 		fw.Write(out)
-		cw.Write([]string{filename, fields.GTIN, fields.Lot, fields.Serial, elementString})
+		cw.Write([]string{filename, tok.Code, fields.GTIN, fields.Lot, fields.Serial, elementString})
 	}
 	cw.Flush()
 

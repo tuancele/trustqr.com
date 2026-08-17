@@ -126,7 +126,7 @@ func main() {
 	templates := &handlers.TemplateHandler{DB: pool, Audit: audit, StorageDir: cfg.TemplateStorageDir}
 	labelExport := &handlers.LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	adminUsers := &handlers.AdminUserHandler{DB: pool, Auth: authSvc, Audit: audit}
-	gs1Label := &handlers.GS1LabelHandler{DB: pool, Tokens: tokenSvc, PublicBaseURL: cfg.PublicBaseURL}
+	gs1Label := &handlers.GS1LabelHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	gs1LabelExport := &handlers.GS1LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL, Tokens: tokenSvc}
 	gs1Verify := &handlers.GS1VerifyHandler{DB: pool, Redis: rdb, Tokens: tokenSvc, Geo: geo}
 
@@ -221,7 +221,8 @@ func main() {
 	protected.Post("/gs1/labels", gs1Label.CreateLabel)
 	protected.Get("/gs1/labels", gs1Label.ListLabels)
 	protected.Get("/gs1/labels/:id", gs1Label.GetLabel)
-	protected.Get("/gs1/labels/:id/qr.png", gs1Label.GetQRImage)
+	protected.Get("/gs1/labels/:id/units", gs1Label.ListUnits)
+	protected.Get("/gs1/units/:id/qr.png", gs1Label.GetUnitQRImage)
 	protected.Delete("/gs1/labels/:id", gs1Label.DeleteLabel)
 	protected.Post("/gs1/labels/:id/export-labels.pdf", gs1LabelExport.ExportPDF)
 	protected.Post("/gs1/labels/:id/export-labels-svg.zip", gs1LabelExport.ExportSVGZip)

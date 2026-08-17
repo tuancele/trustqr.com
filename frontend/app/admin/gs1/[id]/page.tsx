@@ -5,10 +5,11 @@ import Link from 'next/link';
 import {
   ScanBarcode, ArrowLeft, Layers, Printer, Loader2, AlertTriangle,
   FileImage, FileArchive, Settings2, ExternalLink, XCircle,
+  ListChecks, ChevronLeft, ChevronRight, CheckCircle2,
 } from 'lucide-react';
-import { api, downloadPost, fetchBlobUrl } from '@/lib/adminApi';
+import { api, download, downloadPost } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert, EmptyState } from '@/components/ui';
-import { fmtDateShort, fmtDate } from '@/lib/utils';
+import { fmtDateShort, fmtDate, fmtNumber } from '@/lib/utils';
 
 interface GS1LabelDetail {
   id: number;
@@ -25,11 +26,6 @@ interface GS1LabelDetail {
   origin_country: string | null;
   created_at: string;
   element_string: string;
-  verify_code: string | null;
-  scan_count: number;
-  first_scanned_at: string | null;
-  first_scan_city: string | null;
-  status: string;
 }
 
 const GS1_ERROR_LABELS: Record<string, string> = {
@@ -52,7 +48,7 @@ export default function GS1LabelDetailPage({ params }: { params: { id: string } 
   const [data, setData] = useState<GS1LabelDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'print'>('overview');
+  const [tab, setTab] = useState<'overview' | 'units' | 'print'>('overview');
 
   useEffect(() => {
     setLoading(true);
@@ -86,11 +82,13 @@ export default function GS1LabelDetailPage({ params }: { params: { id: string } 
       <div className="border-b border-gray-200 mb-4">
         <div className="flex gap-1">
           <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')} icon={Layers}>Tổng quan</TabBtn>
+          <TabBtn active={tab === 'units'} onClick={() => setTab('units')} icon={ListChecks}>Tem đã in</TabBtn>
           <TabBtn active={tab === 'print'} onClick={() => setTab('print')} icon={Printer}>Xuất in</TabBtn>
         </div>
       </div>
 
       {tab === 'overview' && <OverviewTab data={data} imgSrc={imgSrc} />}
+      {tab === 'units' && <UnitsTab labelId={id} />}
       {tab === 'print' && <PrintTab labelId={id} />}
     </div>
   );
@@ -109,35 +107,12 @@ function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; on
 
 // ============ Overview Tab ============
 function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string }) {
-  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let revoke: string | null = null;
-    fetchBlobUrl(`/api/v1/admin/gs1/labels/${data.id}/qr.png`).then((url) => {
-      revoke = url;
-      setQrBlobUrl(url);
-    }).catch(() => setQrBlobUrl(null));
-    return () => { if (revoke) URL.revokeObjectURL(revoke); };
-  }, [data.id]);
-
-  const isSuspicious = data.scan_count > 1 || data.status !== 'active';
-
   return (
     <div className="max-w-lg space-y-5">
       <div className="card p-5 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col items-center gap-2 bg-gray-50 rounded-lg p-4">
-            <img src={imgSrc} alt="GS1 DataMatrix" className="w-40 h-40" />
-            <span className="text-[11px] text-gray-500 uppercase tracking-wide">DataMatrix (GS1)</span>
-          </div>
-          <div className="flex flex-col items-center gap-2 bg-gray-50 rounded-lg p-4">
-            {qrBlobUrl ? (
-              <img src={qrBlobUrl} alt="Verify QR" className="w-40 h-40" />
-            ) : (
-              <div className="w-40 h-40 flex items-center justify-center text-gray-400 text-xs">Đang tải...</div>
-            )}
-            <span className="text-[11px] text-gray-500 uppercase tracking-wide">QR xác minh (/auth)</span>
-          </div>
+        <div className="flex flex-col items-center gap-2 bg-gray-50 rounded-lg p-4">
+          <img src={imgSrc} alt="GS1 DataMatrix" className="w-40 h-40" />
+          <span className="text-[11px] text-gray-500 uppercase tracking-wide">DataMatrix (GS1)</span>
         </div>
         <table className="w-full text-sm">
           <tbody>
@@ -152,46 +127,123 @@ function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string })
             <Row label="Đơn vị" value={data.unit} />
             <Row label="Hãng sản xuất" value={data.manufacturer} />
             <Row label="Xuất xứ" value={data.origin_country} />
-            <Row label="Mã xác minh" value={data.verify_code} mono />
           </tbody>
         </table>
-        <div className="flex gap-2">
-          <a
-            href={imgSrc}
-            download={`gs1_${data.lot}_${data.serial}.png`}
-            className="btn-primary flex-1 justify-center text-sm"
-          >
-            Tải PNG DataMatrix
-          </a>
-          {qrBlobUrl && (
-            <a
-              href={qrBlobUrl}
-              download={`gs1_${data.lot}_${data.serial}_verify.png`}
-              className="btn-secondary flex-1 justify-center text-sm"
-            >
-              Tải PNG QR xác minh
-            </a>
-          )}
+        <a
+          href={imgSrc}
+          download={`gs1_${data.lot}_${data.serial}.png`}
+          className="btn-primary w-full justify-center text-sm"
+        >
+          Tải PNG DataMatrix
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ============ Units Tab (paginated list of printed stickers) ============
+interface GS1Unit {
+  id: number;
+  serial_no: number;
+  verify_code: string;
+  scan_count: number;
+  first_scanned_at: string | null;
+  first_scan_city: string | null;
+  status: string;
+  created_at: string;
+}
+
+function UnitsTab({ labelId }: { labelId: number }) {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ items: GS1Unit[]; total: number; page: number; page_size: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api<any>(`/api/v1/admin/gs1/labels/${labelId}/units?page=${page}&page_size=50`).then((r) => {
+      if (r.ok && r.data) setData(r.data);
+      setLoading(false);
+    });
+  }, [labelId, page]);
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 0;
+
+  if (loading) return <Spinner />;
+  if (!data || data.items.length === 0) {
+    return (
+      <EmptyState
+        icon={ListChecks}
+        title="Chưa có tem nào được in"
+        description="Sang tab Xuất in để tạo lô tem mới — mỗi tem sẽ có một mã xác minh riêng biệt."
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div className="card p-3 mb-3 flex items-center">
+        <span className="text-sm text-gray-500">{fmtNumber(data.total)} tem đã tạo (qua các lần xuất in)</span>
+      </div>
+
+      <div className="card overflow-hidden mb-3">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left text-xs text-gray-600 uppercase">
+                <th className="px-3 py-2">#</th>
+                <th className="px-3 py-2">Mã xác minh</th>
+                <th className="px-3 py-2">Trạng thái</th>
+                <th className="px-3 py-2 text-right">Số lần quét</th>
+                <th className="px-3 py-2">Quét lần đầu</th>
+                <th className="px-3 py-2">Vị trí</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((u) => (
+                <tr key={u.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-xs text-gray-500">{u.serial_no}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-gov-700">{u.verify_code}</td>
+                  <td className="px-3 py-2">
+                    {u.status === 'active' ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 text-xs">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> active
+                      </span>
+                    ) : (
+                      <span className="text-xs text-amber-700">{u.status}</span>
+                    )}
+                  </td>
+                  <td className={`px-3 py-2 text-right text-xs font-medium ${u.scan_count > 1 ? 'text-red-600' : ''}`}>
+                    {u.scan_count}
+                  </td>
+                  <td className="px-3 py-2 text-xs">{u.first_scanned_at ? fmtDate(u.first_scanned_at) : '—'}</td>
+                  <td className="px-3 py-2 text-xs">{u.first_scan_city || '—'}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => download(`/api/v1/admin/gs1/units/${u.id}/qr.png`, `gs1_unit_${u.verify_code}.png`)}
+                      className="text-xs text-gov-600 hover:underline"
+                    >
+                      Tải QR
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div className="card p-5 space-y-1">
-        <h3 className="text-sm font-semibold text-gray-900 mb-2">Thống kê quét</h3>
-        <table className="w-full text-sm">
-          <tbody>
-            <Row
-              label="Số lần quét"
-              value={
-                <span className={isSuspicious ? 'font-bold text-red-600' : 'font-bold text-emerald-600'}>
-                  {data.scan_count}
-                </span>
-              }
-            />
-            <Row label="Quét lần đầu" value={data.first_scanned_at ? fmtDate(data.first_scanned_at) : null} />
-            <Row label="Vị trí quét đầu" value={data.first_scan_city} />
-            <Row label="Trạng thái" value={data.status} />
-          </tbody>
-        </table>
+      <div className="flex justify-center items-center gap-2">
+        <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
+          className="btn-secondary text-sm disabled:opacity-50">
+          <ChevronLeft className="w-3.5 h-3.5" /> Trước
+        </button>
+        <span className="text-sm text-gray-600 px-3">Trang {page} / {totalPages}</span>
+        <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
+          className="btn-secondary text-sm disabled:opacity-50">
+          Sau <ChevronRight className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -208,7 +260,7 @@ function Row({ label, value, mono }: { label: string; value?: React.ReactNode; m
 }
 
 // ============ Print Tab (print-ready PDF / SVG export) ============
-const MAX_COPIES = 500;
+const MAX_COPIES = 1000;
 const SHEET_PRESETS_MM: Record<string, [number, number]> = {
   A4: [210, 297],
   A3: [297, 420],
@@ -385,10 +437,10 @@ function PrintTab({ labelId }: { labelId: number }) {
             <input type="number" min={1} max={MAX_COPIES} value={quantity}
               onChange={(e) => setQuantity(Math.max(1, Math.min(MAX_COPIES, parseInt(e.target.value) || 1)))}
               className="form-input font-mono w-32" />
-            <span className="text-sm text-gray-500">tem (cùng một mã GS1 này)</span>
+            <span className="text-sm text-gray-500">tem — mỗi tem 1 mã xác minh riêng</span>
           </div>
           <div className="flex gap-1.5 mt-2 flex-wrap">
-            {[1, 10, 50, 100, 500].map((n) => (
+            {[1, 10, 50, 100, 500, 1000].map((n) => (
               <button type="button" key={n} onClick={() => setQuantity(n)}
                 className="px-2 py-1 rounded text-xs bg-gov-50 text-gov-700 hover:bg-gov-100">
                 {n}
