@@ -1,9 +1,12 @@
-import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock } from 'lucide-react';
-import { verifyGS1Code } from '@/lib/api';
+import { headers } from 'next/headers';
+import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock, Smartphone } from 'lucide-react';
+import { verifyGS1Code, isAdminSession } from '@/lib/api';
+import { isMobileUA } from '@/lib/utils';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { GtinHelp } from '@/components/GtinHelp';
 import { ScanCountHelp } from '@/components/ScanCountHelp';
 import { BuyMoreButton } from '@/components/BuyMoreModal';
+import { GS1VoucherBadge } from '@/components/GS1VoucherBadge';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -25,6 +28,10 @@ function fmtDateTimeEN(d: string | null | undefined): string {
 }
 
 export default async function GS1AuthPage({ params }: { params: { code: string } }) {
+  const h = headers();
+  const ua = h.get('user-agent') || '';
+  if (!isMobileUA(ua) && !(await isAdminSession(h.get('cookie') || ''))) return <DesktopOnlyView />;
+
   const result = await verifyGS1Code(params.code);
 
   if (!result || !result.valid) return <InvalidView />;
@@ -153,6 +160,24 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">
           <p>© TrustQR — Anti-Counterfeit Verification System</p>
         </div>
+      </div>
+
+      {!isLocked && <GS1VoucherBadge code={params.code} />}
+    </main>
+  );
+}
+
+function DesktopOnlyView() {
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 flex items-center justify-center px-4">
+      <div className="max-w-sm text-center card p-8">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-gov-500 rounded-2xl shadow-lg ring-4 ring-gov-100 mb-4 mx-auto">
+          <Smartphone className="w-9 h-9 text-gold-400" strokeWidth={2} />
+        </div>
+        <h1 className="font-bold text-gov-700 text-lg mb-2">Please scan with your mobile device</h1>
+        <p className="text-sm text-gray-600">
+          This code can only be verified on a mobile device. Please use your phone&apos;s camera to scan the QR code again.
+        </p>
       </div>
     </main>
   );

@@ -154,6 +154,12 @@ func main() {
 		gs1Verify.Verify,
 	)
 
+	// Lead-capture voucher badge on the GS1 verify page (/auth/:code)
+	api.Post("/gs1/voucher",
+		appmw.RateLimit(rdb, "gs1_voucher_ip", 10, time.Minute, appmw.ClientIP),
+		gs1Verify.RequestVoucher,
+	)
+
 	// "Buy more" — public order form on the GS1 verify page (/auth/:code)
 	api.Get("/gs1/order-sizes",
 		appmw.RateLimit(rdb, "gs1_order_sizes_ip", 30, time.Minute, appmw.ClientIP),
