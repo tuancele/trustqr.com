@@ -10,6 +10,16 @@ import { PageHeader, Spinner, EmptyState, Alert } from '@/components/ui';
 import { fmtDateShort } from '@/lib/utils';
 import { BrandPicker, type Brand } from '@/components/BrandPicker';
 
+interface SizeSpec {
+  id: number;
+  brand_id: number;
+  spec: string;
+  size_spec: string | null;
+  gtin: string | null;
+  product_line: string | null;
+  verified: boolean;
+}
+
 interface GS1Label {
   id: number;
   gtin: string;
@@ -174,12 +184,31 @@ const SERIAL_PREFIX_RE = /^[A-Z0-9]{3}$/;
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState(emptyForm);
   const [brand, setBrand] = useState<Brand | null>(null);
+  const [sizeSpecs, setSizeSpecs] = useState<SizeSpec[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdSerial, setCreatedSerial] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!brand) { setSizeSpecs([]); return; }
+    api<SizeSpec[]>(`/api/v1/admin/gs1/size-specs?brand_id=${brand.id}`).then((r) => {
+      setSizeSpecs(r.ok && r.data ? r.data : []);
+    });
+  }, [brand]);
+
   function set<K extends keyof typeof emptyForm>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function selectSizeSpec(specId: string) {
+    const chosen = sizeSpecs.find((s) => String(s.id) === specId);
+    if (!chosen) { set('spec', ''); return; }
+    setForm((f) => ({
+      ...f,
+      spec: chosen.spec,
+      size_spec: chosen.size_spec || f.size_spec,
+      gtin: chosen.gtin || f.gtin,
+    }));
   }
 
   async function submit(e: React.FormEvent) {
@@ -245,9 +274,30 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           <input value={form.product_code} onChange={(e) => set('product_code', e.target.value)}
             placeholder="C010400955" className="form-input" />
         </Field>
+        <Field label="Thương hiệu">
+          <BrandPicker value={brand} onChange={setBrand} />
+        </Field>
         <Field label="Quy cách">
-          <input value={form.spec} onChange={(e) => set('spec', e.target.value)}
-            placeholder="FXS4508" className="form-input" />
+          {sizeSpecs.length > 0 ? (
+            <select
+              value={sizeSpecs.find((s) => s.spec === form.spec)?.id ?? ''}
+              onChange={(e) => selectSizeSpec(e.target.value)}
+              className="form-input"
+            >
+              <option value="">— Chọn quy cách —</option>
+              {sizeSpecs.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.spec}{s.product_line ? ` — ${s.product_line}` : ''}{s.size_spec ? ` (${s.size_spec})` : ''}{!s.gtin ? ' [chưa có GTIN]' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input value={form.spec} onChange={(e) => set('spec', e.target.value)}
+              placeholder="FXS4508" className="form-input" />
+          )}
+          {sizeSpecs.length > 0 && sizeSpecs.find((s) => s.spec === form.spec) && !sizeSpecs.find((s) => s.spec === form.spec)?.gtin && (
+            <p className="text-xs text-amber-600 mt-1">Quy cách này chưa có GTIN xác minh — nhập tay GTIN bên trên.</p>
+          )}
         </Field>
         <Field label="Kích thước">
           <input value={form.size_spec} onChange={(e) => set('size_spec', e.target.value)}
@@ -264,9 +314,6 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         <Field label="Xuất xứ">
           <input value={form.origin_country} onChange={(e) => set('origin_country', e.target.value)}
             placeholder="Hàn Quốc" className="form-input" />
-        </Field>
-        <Field label="Thương hiệu">
-          <BrandPicker value={brand} onChange={setBrand} />
         </Field>
       </div>
 

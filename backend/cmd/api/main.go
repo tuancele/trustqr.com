@@ -129,6 +129,7 @@ func main() {
 	gs1Label := &handlers.GS1LabelHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	gs1LabelExport := &handlers.GS1LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL, Tokens: tokenSvc}
 	gs1Verify := &handlers.GS1VerifyHandler{DB: pool, Redis: rdb, Tokens: tokenSvc, Geo: geo}
+	gs1SizeSpecs := &handlers.GS1SizeSpecHandler{DB: pool, Audit: audit}
 
 	api := app.Group("/api/v1")
 
@@ -227,6 +228,10 @@ func main() {
 	protected.Delete("/gs1/labels/:id", gs1Label.DeleteLabel)
 	protected.Post("/gs1/labels/:id/export-labels.pdf", gs1LabelExport.ExportPDF)
 	protected.Post("/gs1/labels/:id/export-labels-svg.zip", gs1LabelExport.ExportSVGZip)
+	protected.Get("/gs1/size-specs", gs1SizeSpecs.List)
+	protected.Post("/gs1/size-specs", gs1SizeSpecs.Create)
+	protected.Patch("/gs1/size-specs/:id", gs1SizeSpecs.Update)
+	protected.Delete("/gs1/size-specs/:id", gs1SizeSpecs.Delete)
 
 	// Products CRUD
 	protected.Get("/products", products.List)
