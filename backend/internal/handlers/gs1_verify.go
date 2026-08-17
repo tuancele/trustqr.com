@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -44,6 +45,10 @@ type gs1VerifyResp struct {
 	Unit            string  `json:"unit,omitempty"`
 	Manufacturer    string  `json:"manufacturer,omitempty"`
 	OriginCountry   string  `json:"origin_country,omitempty"`
+	BrandID         *int64  `json:"brand_id,omitempty"`
+	BrandName       string  `json:"brand_name,omitempty"`
+	BrandWebsite    string  `json:"brand_website,omitempty"`
+	BrandLogoURL    string  `json:"brand_logo_url,omitempty"`
 	ScanCount       int     `json:"scan_count"`
 	IsFirstScan     bool    `json:"is_first_scan"`
 	FirstScannedAt  *string `json:"first_scanned_at,omitempty"`
@@ -89,6 +94,10 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		firstScannedAt  *time.Time
 		firstScanCity   string
 		status          string
+		brandID         *int64
+		brandName       string
+		brandWebsite    string
+		brandHasLogo    bool
 	)
 	err := h.DB.QueryRow(ctx, `
 		UPDATE gs1_label_units
@@ -109,11 +118,15 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	}
 
 	err = h.DB.QueryRow(ctx, `
-		SELECT gtin, manufacture_date, expiry_date, lot, serial,
-		       product_name, product_code, spec, unit, manufacturer, origin_country
-		FROM gs1_labels WHERE id = $1
+		SELECT gl.gtin, gl.manufacture_date, gl.expiry_date, gl.lot, gl.serial,
+		       gl.product_name, gl.product_code, gl.spec, gl.unit, gl.manufacturer, gl.origin_country,
+		       gl.brand_id, COALESCE(b.name,''), COALESCE(b.website,''), (b.logo_path IS NOT NULL)
+		FROM gs1_labels gl
+		LEFT JOIN brands b ON b.id = gl.brand_id
+		WHERE gl.id = $1
 	`, labelID).Scan(&gtin, &manufactureDate, &expiryDate, &lot, &serial,
-		&productName, &productCode, &spec, &unit, &manufacturer, &originCountry)
+		&productName, &productCode, &spec, &unit, &manufacturer, &originCountry,
+		&brandID, &brandName, &brandWebsite, &brandHasLogo)
 	if err != nil {
 		log.Printf("gs1 verify label lookup error: %v", err)
 		return c.Status(500).JSON(fiber.Map{"error": "internal"})
@@ -166,6 +179,14 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	}
 	if originCountry != nil {
 		resp.OriginCountry = *originCountry
+	}
+	if brandID != nil {
+		resp.BrandID = brandID
+		resp.BrandName = brandName
+		resp.BrandWebsite = brandWebsite
+		if brandHasLogo {
+			resp.BrandLogoURL = fmt.Sprintf("/api/v1/brands/%d/logo/file", *brandID)
+		}
 	}
 	if firstScannedAt != nil {
 		s := firstScannedAt.Format(time.RFC3339)

@@ -26,7 +26,13 @@ interface GS1LabelDetail {
   origin_country: string | null;
   created_at: string;
   element_string: string;
+  brand_id?: number | null;
+  brand_name?: string;
+  brand_website?: string;
+  brand_logo_url?: string;
 }
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 const GS1_ERROR_LABELS: Record<string, string> = {
   not_found: 'Không tìm thấy mã này.',
@@ -126,6 +132,23 @@ function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string })
             <Row label="Đơn vị" value={data.unit} />
             <Row label="Hãng sản xuất" value={data.manufacturer} />
             <Row label="Xuất xứ" value={data.origin_country} />
+            <Row
+              label="Thương hiệu"
+              value={
+                data.brand_name ? (
+                  <span className="inline-flex items-center gap-2">
+                    {data.brand_logo_url && (
+                      <img
+                        src={`${API_URL}/api/v1/brands/${data.brand_id}/logo/file`}
+                        alt=""
+                        className="w-5 h-5 object-contain rounded border border-gray-100 bg-gray-50"
+                      />
+                    )}
+                    {data.brand_name}
+                  </span>
+                ) : null
+              }
+            />
           </tbody>
         </table>
         <a

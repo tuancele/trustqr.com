@@ -8,6 +8,7 @@ import {
 import { api } from '@/lib/adminApi';
 import { PageHeader, Spinner, EmptyState, Alert } from '@/components/ui';
 import { fmtDateShort } from '@/lib/utils';
+import { BrandPicker, type Brand } from '@/components/BrandPicker';
 
 interface GS1Label {
   id: number;
@@ -22,6 +23,7 @@ interface GS1Label {
   unit: string | null;
   manufacturer: string | null;
   origin_country: string | null;
+  brand_id: number | null;
   created_at: string;
 }
 
@@ -167,6 +169,7 @@ const emptyForm = {
 
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState(emptyForm);
+  const [brand, setBrand] = useState<Brand | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -184,11 +187,12 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     setBusy(true);
     const r = await api<{ id: number }>('/api/v1/admin/gs1/labels', {
       method: 'POST',
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, brand_id: brand?.id ?? null }),
     });
     setBusy(false);
     if (!r.ok || !r.data) { setError(errMsg(r.error)); return; }
     setForm(emptyForm);
+    setBrand(null);
     onCreated();
   }
 
@@ -243,6 +247,9 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         <Field label="Xuất xứ">
           <input value={form.origin_country} onChange={(e) => set('origin_country', e.target.value)}
             placeholder="Hàn Quốc" className="form-input" />
+        </Field>
+        <Field label="Thương hiệu">
+          <BrandPicker value={brand} onChange={setBrand} />
         </Field>
       </div>
 

@@ -1,0 +1,13 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Trusted Brand">
+  <circle cx="100" cy="100" r="94" fill="none" stroke="#111827" stroke-width="4" stroke-dasharray="1 9" stroke-linecap="round"/>
+  <circle cx="100" cy="100" r="80" fill="none" stroke="#111827" stroke-width="3"/>
+  <path id="trustedBrandTopArc" d="M 34,100 A 66,66 0 0 1 166,100" fill="none"/>
+  <path id="trustedBrandBottomArc" d="M 166,100 A 66,66 0 0 1 34,100" fill="none"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="20" letter-spacing="3" fill="#111827">
+    <textPath href="#trustedBrandTopArc" startOffset="50%" text-anchor="middle">TRUSTED</textPath>
+  </text>
+  <text font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="20" letter-spacing="3" fill="#111827">
+    <textPath href="#trustedBrandBottomArc" startOffset="50%" text-anchor="middle">BRAND</textPath>
+  </text>
+  <polygon points="100,58 110,86 140,87 116,105 125,134 100,117 75,134 84,105 60,87 90,86" fill="#111827"/>
+</svg>

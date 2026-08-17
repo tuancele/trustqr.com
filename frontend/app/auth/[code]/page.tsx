@@ -33,17 +33,21 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
 
       <div className="max-w-md mx-auto">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3">
-            <ShieldCheck className="w-9 h-9 text-white" strokeWidth={2} />
-          </div>
+          {result.brand_logo_url ? (
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden">
+              <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3">
+              <ShieldCheck className="w-9 h-9 text-white" strokeWidth={2} />
+            </div>
+          )}
           <h1 className="font-bold text-slate-800 text-lg tracking-tight">Product Authenticity Check</h1>
           <p className="text-xs text-slate-500 mt-1">TrustQR GS1 Verification</p>
         </div>
 
         <div className="rounded-2xl border-2 border-emerald-200 bg-white p-4 shadow-sm flex items-center gap-4">
-          <div className="flex-shrink-0 w-12 h-12 rounded-full bg-emerald-600 flex items-center justify-center">
-            <ShieldCheck className="w-7 h-7 text-white" strokeWidth={2.5} />
-          </div>
+          <img src="/trusted-brand-badge.svg" alt="Trusted Brand" className="flex-shrink-0 w-12 h-12" />
           <p className="flex-1 text-sm text-slate-700 leading-relaxed">
             This product is <span className="font-semibold text-emerald-700">genuine</span>. This code has been verified{' '}
             <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-emerald-600'}`}>{result.scan_count}</span> time
@@ -96,7 +100,9 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           {result.first_scanned_at && (
             <InfoRow icon={Clock} label="First Scanned" value={fmtDateTimeEN(result.first_scanned_at)} />
           )}
-          {result.first_scan_city && <InfoRow icon={MapPin} label="First Scan Location" value={result.first_scan_city} />}
+          {result.first_scan_city && result.first_scan_city !== 'Local' && (
+            <InfoRow icon={MapPin} label="First Scan Location" value={result.first_scan_city} />
+          )}
         </div>
 
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">

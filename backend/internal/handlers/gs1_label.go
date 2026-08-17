@@ -37,6 +37,7 @@ type gs1LabelReq struct {
 	Unit            string `json:"unit"`
 	Manufacturer    string `json:"manufacturer"`
 	OriginCountry   string `json:"origin_country"`
+	BrandID         *int64 `json:"brand_id"`
 }
 
 type gs1LabelRow struct {
@@ -52,16 +53,17 @@ type gs1LabelRow struct {
 	Unit            *string    `json:"unit"`
 	Manufacturer    *string    `json:"manufacturer"`
 	OriginCountry   *string    `json:"origin_country"`
+	BrandID         *int64     `json:"brand_id"`
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
 const gs1LabelColumns = `id, gtin, manufacture_date, expiry_date, lot, serial,
-	product_name, product_code, spec, unit, manufacturer, origin_country, created_at`
+	product_name, product_code, spec, unit, manufacturer, origin_country, brand_id, created_at`
 
 func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 	var r gs1LabelRow
 	err := row.Scan(&r.ID, &r.GTIN, &r.ManufactureDate, &r.ExpiryDate, &r.Lot, &r.Serial,
-		&r.ProductName, &r.ProductCode, &r.Spec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.CreatedAt)
+		&r.ProductName, &r.ProductCode, &r.Spec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.BrandID, &r.CreatedAt)
 	return r, err
 }
 
@@ -101,10 +103,10 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 
 	row := h.DB.QueryRow(ctx, `
 		INSERT INTO gs1_labels (gtin, manufacture_date, expiry_date, lot, serial,
-			product_name, product_code, spec, unit, manufacturer, origin_country)
-		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''))
+			product_name, product_code, spec, unit, manufacturer, origin_country, brand_id)
+		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), $12)
 		RETURNING `+gs1LabelColumns, req.GTIN, mfg, req.ExpiryDate, req.Lot, req.Serial,
-		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry)
+		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID)
 
 	r, err := scanGS1LabelRow(row)
 	if err != nil {
@@ -161,6 +163,9 @@ func (h *GS1LabelHandler) ListLabels(c *fiber.Ctx) error {
 type gs1LabelDetail struct {
 	gs1LabelRow
 	ElementString string `json:"element_string"`
+	BrandName     string `json:"brand_name,omitempty"`
+	BrandWebsite  string `json:"brand_website,omitempty"`
+	BrandLogoURL  string `json:"brand_logo_url,omitempty"`
 }
 
 func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
@@ -189,7 +194,22 @@ func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(gs1LabelDetail{gs1LabelRow: r, ElementString: elementString})
+	detail := gs1LabelDetail{gs1LabelRow: r, ElementString: elementString}
+	if r.BrandID != nil {
+		var name, website string
+		var hasLogo bool
+		if err := h.DB.QueryRow(ctx, `
+			SELECT name, COALESCE(website,''), (logo_path IS NOT NULL) FROM brands WHERE id = $1
+		`, *r.BrandID).Scan(&name, &website, &hasLogo); err == nil {
+			detail.BrandName = name
+			detail.BrandWebsite = website
+			if hasLogo {
+				detail.BrandLogoURL = fmt.Sprintf("/api/v1/brands/%d/logo/file", *r.BrandID)
+			}
+		}
+	}
+
+	return c.JSON(detail)
 }
 
 // -------- Print units (one row per physical sticker, created at export time) --------
