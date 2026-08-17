@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { HelpCircle } from 'lucide-react';
 
-export function GtinHelp() {
+export function GtinHelp({ gtin }: { gtin?: string | null }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -24,14 +24,16 @@ export function GtinHelp() {
             <p className="text-xs text-slate-600 leading-relaxed">
               A GTIN (Global Trade Item Number) is a unique code that identifies this specific product worldwide.
             </p>
-            <a
-              href="https://accessgudid.nlm.nih.gov/devices/GTIN"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block mt-2 text-xs font-semibold text-gov-600 hover:underline"
-            >
-              Click here to look up this GTIN →
-            </a>
+            {gtin && (
+              <a
+                href={`https://accessgudid.nlm.nih.gov/devices/${encodeURIComponent(gtin)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-2 text-xs font-semibold text-gov-600 hover:underline"
+              >
+                Click here to look up this GTIN →
+              </a>
+            )}
           </div>
         </>
       )}

@@ -114,7 +114,7 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
 
         <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
           <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Traceability (GS1)</h2>
-          <InfoRow icon={Tag} label="GTIN" value={<span className="font-mono inline-flex items-center gap-1.5">{result.gtin || '—'}<GtinHelp /></span>} />
+          <InfoRow icon={Tag} label="GTIN" value={<span className="font-mono inline-flex items-center gap-1.5">{result.gtin || '—'}<GtinHelp gtin={result.gtin} /></span>} />
           <InfoRow icon={Hash} label="Lot / Batch" value={<span className="font-mono">{result.lot || '—'}</span>} />
           <InfoRow icon={Hash} label="Serial Number" value={<span className="font-mono">{result.serial || '—'}</span>} />
           <InfoRow icon={Calendar} label="Manufacture Date" value={fmtDateEN(result.manufacture_date)} />
