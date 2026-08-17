@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -30,7 +34,8 @@ type gs1LabelReq struct {
 	ManufactureDate string `json:"manufacture_date"` // "YYYY-MM-DD"
 	ExpiryDate      string `json:"expiry_date"`      // "YYYY-MM-DD", optional
 	Lot             string `json:"lot"`
-	Serial          string `json:"serial"`
+	Serial          string `json:"serial"`        // full serial; used as-is by UpdateLabel
+	SerialPrefix    string `json:"serial_prefix"` // 3-char admin-entered prefix; CreateLabel appends 7 auto-generated chars
 	ProductName     string `json:"product_name"`
 	ProductCode     string `json:"product_code"`
 	Spec            string `json:"spec"`
@@ -69,6 +74,26 @@ func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 
 // -------- Create a new manually-entered label --------
 
+var serialPrefixRe = regexp.MustCompile(`^[A-Z0-9]{3}$`)
+
+const serialSuffixAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+// generateSerialSuffix returns n random uppercase-alphanumeric characters,
+// appended to the admin-entered 3-char prefix to form the full AI 21 serial
+// — the admin only has to type a short, meaningful prefix, and the system
+// guarantees the rest is unpredictable/unique.
+func generateSerialSuffix(n int) (string, error) {
+	b := make([]byte, n)
+	for i := range b {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(serialSuffixAlphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = serialSuffixAlphabet[idx.Int64()]
+	}
+	return string(b), nil
+}
+
 // validateGS1LabelReq parses and checksum-validates the GS1 fields shared by
 // create and update, so a label can never be saved in a state that couldn't
 // render as a valid GS1 DataMatrix.
@@ -100,6 +125,16 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
 	}
+
+	prefix := strings.ToUpper(strings.TrimSpace(req.SerialPrefix))
+	if !serialPrefixRe.MatchString(prefix) {
+		return c.Status(400).JSON(fiber.Map{"error": "serial_prefix_invalid"})
+	}
+	suffix, err := generateSerialSuffix(7)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "serial_gen_failed"})
+	}
+	req.Serial = prefix + suffix
 
 	mfg, _, status, errResp := validateGS1LabelReq(req)
 	if errResp != nil {

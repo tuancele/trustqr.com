@@ -23,6 +23,25 @@ import (
 // carrying its own unique verify code (mirrors maxExportTokens for batches).
 const maxGS1ExportCopies = 1000
 
+// gs1BarcodeDPI is the raster resolution used to generate the Code128 source
+// image before fpdf/SVG scale it into its ratio-derived physical box —
+// 300 DPI is standard print quality and comfortably scannable.
+const gs1BarcodeDPI = 300.0
+
+// mmToPxAtDPI converts a physical mm length to a pixel count at dpi,
+// clamped to a sane range so a badly-configured template ratio can't request
+// a degenerate (0px) or excessive barcode source image.
+func mmToPxAtDPI(mm, dpi float64) int {
+	px := int(mm / 25.4 * dpi)
+	if px < 100 {
+		return 100
+	}
+	if px > 3000 {
+		return 3000
+	}
+	return px
+}
+
 type GS1LabelExportHandler struct {
 	DB            *pgxpool.Pool
 	PublicBaseURL string
@@ -159,7 +178,8 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	if _, err := loadGS1LabelFields(ctx, h.DB, id); err != nil {
+	fields, err := loadGS1LabelFields(ctx, h.DB, id)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
 		}
@@ -171,13 +191,31 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
-	pdfBytes, err := services.RenderTiledPDF(
-		tpl.FilePath, tpl.FileType,
-		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
-		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
-		tokens,
-		func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) },
-	)
+	imageFn := func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) }
+
+	var pdfBytes []byte
+	if tpl.IsGS1 {
+		barcodePNG, genErr := services.GenerateBarcodePNG(fields.Serial,
+			mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
+			mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
+		if genErr != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "barcode_gen_failed", "detail": genErr.Error()})
+		}
+		pdfBytes, err = services.RenderTiledGS1PDF(
+			tpl.FilePath, tpl.FileType,
+			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
+			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
+			tpl.GS1Layout, fields.Serial, barcodePNG,
+			tokens, imageFn,
+		)
+	} else {
+		pdfBytes, err = services.RenderTiledPDF(
+			tpl.FilePath, tpl.FileType,
+			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
+			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
+			tokens, imageFn,
+		)
+	}
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
 	}
@@ -250,6 +288,16 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
+	var barcodePNG []byte
+	if tpl.IsGS1 {
+		barcodePNG, err = services.GenerateBarcodePNG(fields.Serial,
+			mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
+			mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "barcode_gen_failed", "detail": err.Error()})
+		}
+	}
+
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
@@ -262,7 +310,13 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "qr_render_failed", "detail": err.Error()})
 		}
-		out, err := services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
+		var out []byte
+		if tpl.IsGS1 {
+			out, err = services.InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG,
+				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, fields.Serial, tpl.WidthMM, tpl.HeightMM)
+		} else {
+			out, err = services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
+		}
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
 		}

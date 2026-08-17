@@ -15,6 +15,7 @@ interface Template {
   qr_x_ratio: number;
   qr_y_ratio: number;
   qr_size_ratio: number;
+  is_gs1: boolean;
   created_at: string;
 }
 
@@ -28,6 +29,7 @@ export default function TemplatesPage() {
   const [widthMM, setWidthMM] = useState('');
   const [heightMM, setHeightMM] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [isGS1, setIsGS1] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,6 +76,7 @@ export default function TemplatesPage() {
     fd.append('width_mm', widthMM);
     fd.append('height_mm', heightMM);
     fd.append('file', file);
+    fd.append('is_gs1', isGS1 ? 'true' : 'false');
     const r = await uploadForm('/api/v1/admin/templates', fd);
     setUploading(false);
     if (r.ok) {
@@ -81,6 +84,7 @@ export default function TemplatesPage() {
       setWidthMM('');
       setHeightMM('');
       setFile(null);
+      setIsGS1(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
       load();
     } else {
@@ -142,6 +146,16 @@ export default function TemplatesPage() {
               className="form-input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gov-50 file:text-gov-700 file:text-xs"
             />
           </div>
+          <div className="lg:col-span-5 flex items-center gap-2">
+            <input
+              id="is_gs1" type="checkbox"
+              checked={isGS1} onChange={(e) => setIsGS1(e.target.checked)}
+              className="rounded border-gray-300 text-gov-600 focus:ring-gov-500"
+            />
+            <label htmlFor="is_gs1" className="text-sm text-gray-700">
+              Mẫu tem GS1 (thêm Barcode + 2 vị trí Serial text, ngoài QR)
+            </label>
+          </div>
           <div className="lg:col-span-5">
             <button type="submit" disabled={uploading} className="btn-primary">
               {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
@@ -179,13 +193,16 @@ export default function TemplatesPage() {
                     <p className="font-semibold text-gray-900 truncate">{t.name}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{t.width_mm} × {t.height_mm} mm</p>
                   </div>
-                  <span className={t.file_type === 'svg' ? 'badge-info' : 'badge-success'}>
-                    {t.file_type.toUpperCase()}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={t.file_type === 'svg' ? 'badge-info' : 'badge-success'}>
+                      {t.file_type.toUpperCase()}
+                    </span>
+                    {t.is_gs1 && <span className="badge-warning">GS1</span>}
+                  </div>
                 </div>
                 <div className="flex gap-2 mt-3">
                   <Link href={`/admin/templates/${t.id}`} className="btn-secondary flex-1 justify-center text-xs">
-                    <Settings2 className="w-3.5 h-3.5" /> Vị trí QR
+                    <Settings2 className="w-3.5 h-3.5" /> {t.is_gs1 ? 'Vị trí đối tượng' : 'Vị trí QR'}
                   </Link>
                   <button
                     onClick={() => del(t)}

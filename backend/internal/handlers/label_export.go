@@ -36,15 +36,22 @@ type labelTemplateInfo struct {
 	QRXRatio    float64
 	QRYRatio    float64
 	QRSizeRatio float64
+	IsGS1       bool
+	GS1Layout   services.GS1Layout
 }
 
 func loadLabelTemplate(ctx context.Context, db *pgxpool.Pool, id int64) (*labelTemplateInfo, error) {
 	var t labelTemplateInfo
 	err := db.QueryRow(ctx, `
-		SELECT id, width_mm, height_mm, file_type, file_path, qr_x_ratio, qr_y_ratio, qr_size_ratio
+		SELECT id, width_mm, height_mm, file_type, file_path, qr_x_ratio, qr_y_ratio, qr_size_ratio,
+			is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio,
+			text1_x_ratio, text1_y_ratio, text1_size_ratio, text2_x_ratio, text2_y_ratio, text2_size_ratio
 		FROM label_templates WHERE id = $1`, id).Scan(
 		&t.ID, &t.WidthMM, &t.HeightMM, &t.FileType, &t.FilePath,
-		&t.QRXRatio, &t.QRYRatio, &t.QRSizeRatio)
+		&t.QRXRatio, &t.QRYRatio, &t.QRSizeRatio, &t.IsGS1,
+		&t.GS1Layout.BarcodeXRatio, &t.GS1Layout.BarcodeYRatio, &t.GS1Layout.BarcodeWRatio, &t.GS1Layout.BarcodeHRatio,
+		&t.GS1Layout.Text1XRatio, &t.GS1Layout.Text1YRatio, &t.GS1Layout.Text1SizeRatio,
+		&t.GS1Layout.Text2XRatio, &t.GS1Layout.Text2YRatio, &t.GS1Layout.Text2SizeRatio)
 	if err != nil {
 		return nil, err
 	}

@@ -129,6 +129,120 @@ func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, l
 	return buf.Bytes(), nil
 }
 
+// GS1Layout groups the position ratios for the extra objects a GS1 label
+// template composites alongside the QR: a Code128 barcode (independent
+// width/height ratios, since unlike QR it isn't square-locked) and two
+// copies of the serial as human-readable text — one physical sticker has 2
+// spots that must both show the same serial value.
+type GS1Layout struct {
+	BarcodeXRatio, BarcodeYRatio, BarcodeWRatio, BarcodeHRatio float64
+	Text1XRatio, Text1YRatio, Text1SizeRatio                   float64
+	Text2XRatio, Text2YRatio, Text2SizeRatio                   float64
+}
+
+const mmToPt = 2.834645669
+
+// RenderTiledGS1PDF is RenderTiledPDF plus a barcode image and two copies of
+// serialText composited into every cell. Unlike the per-unit QR, the
+// barcode/text are the same for every physical copy in a print run (a GS1
+// label's serial is defined once, at the label level), so they're
+// registered/drawn once and reused across cells the same way the template
+// image itself is.
+func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, serialText string, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
+	if err != nil {
+		return nil, err
+	}
+
+	orientation := "P"
+	if sheetW > sheetH {
+		orientation = "L"
+	}
+
+	pdf := fpdf.New(orientation, "mm", "", "")
+	pdf.SetMargins(0, 0, 0)
+	pdf.SetAutoPageBreak(false, 0)
+
+	tplFile, err := os.Open(templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("open template: %w", err)
+	}
+	defer tplFile.Close()
+
+	imgType := strings.ToUpper(templateType)
+	if imgType == "JPG" {
+		imgType = "JPEG"
+	}
+	imgOpts := fpdf.ImageOptions{ImageType: imgType}
+	pdf.RegisterImageOptionsReader("tpl", imgOpts, tplFile)
+	if pdf.Err() {
+		return nil, fmt.Errorf("register template image: %v", pdf.Error())
+	}
+
+	barcodeOpts := fpdf.ImageOptions{ImageType: "PNG"}
+	pdf.RegisterImageOptionsReader("barcode", barcodeOpts, bytes.NewReader(barcodePNG))
+	if pdf.Err() {
+		return nil, fmt.Errorf("register barcode image: %v", pdf.Error())
+	}
+
+	qrSide := qrSizeRatio * labelW
+	qrOffsetX := qrXRatio * labelW
+	qrOffsetY := qrYRatio * labelH
+	qrOpts := fpdf.ImageOptions{ImageType: "PNG"}
+
+	barcodeX := layout.BarcodeXRatio * labelW
+	barcodeY := layout.BarcodeYRatio * labelH
+	barcodeW := layout.BarcodeWRatio * labelW
+	barcodeH := layout.BarcodeHRatio * labelH
+
+	text1X := layout.Text1XRatio * labelW
+	text1Y := layout.Text1YRatio * labelH
+	text1SizeMM := layout.Text1SizeRatio * labelW
+	text2X := layout.Text2XRatio * labelW
+	text2Y := layout.Text2YRatio * labelH
+	text2SizeMM := layout.Text2SizeRatio * labelW
+
+	perPage := grid.Cols * grid.Rows
+	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+
+	for i, tok := range tokens {
+		if i > 0 && i%perPage == 0 {
+			pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+		}
+		posInPage := i % perPage
+		col := posInPage % grid.Cols
+		row := posInPage / grid.Cols
+		cellX := margin + float64(col)*(labelW+gutter)
+		cellY := margin + float64(row)*(labelH+gutter)
+
+		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
+		pdf.ImageOptions("barcode", cellX+barcodeX, cellY+barcodeY, barcodeW, barcodeH, false, barcodeOpts, 0, "")
+
+		// pdf.Text's y is the text baseline; adding the font's mm height to
+		// the ratio-derived top offset approximates a top-left anchor, so
+		// text1/text2 line up with the barcode/QR boxes the same way the
+		// position editor shows them (top-left origin).
+		pdf.SetFont("Helvetica", "", text1SizeMM*mmToPt)
+		pdf.Text(cellX+text1X, cellY+text1Y+text1SizeMM, serialText)
+		pdf.SetFont("Helvetica", "", text2SizeMM*mmToPt)
+		pdf.Text(cellX+text2X, cellY+text2Y+text2SizeMM, serialText)
+
+		qrPNG, err := imageFn(tok)
+		if err != nil {
+			return nil, fmt.Errorf("generate image for %s: %w", tok.Code, err)
+		}
+		qrName := "qr_" + tok.Code
+		pdf.RegisterImageOptionsReader(qrName, qrOpts, bytes.NewReader(qrPNG))
+		pdf.ImageOptions(qrName, cellX+qrOffsetX, cellY+qrOffsetY, qrSide, qrSide, false, qrOpts, 0, "")
+	}
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, fmt.Errorf("pdf output: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 // InjectQRIntoSVG returns a copy of svgBytes with a base64-embedded QR <image>
 // element inserted just before the closing </svg> tag. Position/size are
 // expressed as SVG percentages (relative to the SVG viewport), which sidesteps
@@ -164,6 +278,52 @@ func InjectQRIntoSVG(svgBytes, qrPNG []byte, xRatio, yRatio, sizeRatio, widthMM,
 	out = append(out, imageEl...)
 	out = append(out, svgBytes[idx:]...)
 	return out, nil
+}
+
+// InjectGS1ObjectsIntoSVG is InjectQRIntoSVG plus a barcode <image> and two
+// serial <text> elements, the SVG-export equivalent of RenderTiledGS1PDF's
+// compositing for GS1-flagged templates. Text position/size use the same
+// percentage-of-viewport convention as the image elements (per the SVG spec,
+// percentage lengths on properties like font-size resolve against the
+// viewport's normalized diagonal), so it stays consistent with the rest of
+// this file's resolution-independent approach.
+func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, serialText string, widthMM, heightMM float64) ([]byte, error) {
+	const closeTag = "</svg>"
+	idx := bytes.LastIndex(svgBytes, []byte(closeTag))
+	if idx == -1 {
+		return nil, fmt.Errorf("invalid_svg: no closing </svg> tag found")
+	}
+
+	qrSideMM := qrSizeRatio * widthMM
+	qrWidthPct := qrSizeRatio * 100
+	qrHeightPct := qrWidthPct
+	if heightMM > 0 {
+		qrHeightPct = qrSideMM / heightMM * 100
+	}
+
+	var els bytes.Buffer
+	fmt.Fprintf(&els, `<image x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" href="data:image/png;base64,%s" preserveAspectRatio="none"/>`,
+		qrXRatio*100, qrYRatio*100, qrWidthPct, qrHeightPct, base64.StdEncoding.EncodeToString(qrPNG))
+	fmt.Fprintf(&els, `<image x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" href="data:image/png;base64,%s" preserveAspectRatio="none"/>`,
+		layout.BarcodeXRatio*100, layout.BarcodeYRatio*100, layout.BarcodeWRatio*100, layout.BarcodeHRatio*100, base64.StdEncoding.EncodeToString(barcodePNG))
+
+	escaped := escapeXMLText(serialText)
+	fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="monospace" dominant-baseline="hanging">%s</text>`,
+		layout.Text1XRatio*100, layout.Text1YRatio*100, layout.Text1SizeRatio*100, escaped)
+	fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="monospace" dominant-baseline="hanging">%s</text>`,
+		layout.Text2XRatio*100, layout.Text2YRatio*100, layout.Text2SizeRatio*100, escaped)
+
+	out := make([]byte, 0, len(svgBytes)+els.Len())
+	out = append(out, svgBytes[:idx]...)
+	out = append(out, els.Bytes()...)
+	out = append(out, svgBytes[idx:]...)
+	return out, nil
+}
+
+func escapeXMLText(s string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
 }
 
 var svgDangerousPatterns = []*regexp.Regexp{

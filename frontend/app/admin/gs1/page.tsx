@@ -32,6 +32,8 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
   expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
   lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
+  serial_prefix_invalid: 'Tiền tố serial phải gồm đúng 3 ký tự chữ/số (A-Z, 0-9).',
+  serial_gen_failed: 'Không tạo được serial, thử lại.',
   not_found: 'Không tìm thấy mã này.',
 };
 
@@ -163,15 +165,17 @@ export default function GS1LabelsPage() {
 
 // ============ Create form ============
 const emptyForm = {
-  gtin: '', manufacture_date: '', expiry_date: '', lot: '', serial: '',
+  gtin: '', manufacture_date: '', expiry_date: '', lot: '', serial_prefix: '',
   product_name: '', product_code: '', spec: '', unit: '', manufacturer: '', origin_country: '',
 };
+const SERIAL_PREFIX_RE = /^[A-Z0-9]{3}$/;
 
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState(emptyForm);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdSerial, setCreatedSerial] = useState<string | null>(null);
 
   function set<K extends keyof typeof emptyForm>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -180,12 +184,17 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!form.gtin || !form.manufacture_date || !form.lot || !form.serial) {
-      setError('Cần nhập GTIN, ngày sản xuất, lô và serial.');
+    setCreatedSerial(null);
+    if (!form.gtin || !form.manufacture_date || !form.lot || !form.serial_prefix) {
+      setError('Cần nhập GTIN, ngày sản xuất, lô và tiền tố serial.');
+      return;
+    }
+    if (!SERIAL_PREFIX_RE.test(form.serial_prefix)) {
+      setError(GS1_ERROR_LABELS.serial_prefix_invalid);
       return;
     }
     setBusy(true);
-    const r = await api<{ id: number }>('/api/v1/admin/gs1/labels', {
+    const r = await api<GS1Label>('/api/v1/admin/gs1/labels', {
       method: 'POST',
       body: JSON.stringify({ ...form, brand_id: brand?.id ?? null }),
     });
@@ -193,6 +202,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     if (!r.ok || !r.data) { setError(errMsg(r.error)); return; }
     setForm(emptyForm);
     setBrand(null);
+    setCreatedSerial(r.data.serial);
     onCreated();
   }
 
@@ -220,9 +230,11 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           <input value={form.lot} onChange={(e) => set('lot', e.target.value)}
             placeholder="R02511110020" className="form-input font-mono" />
         </Field>
-        <Field label="Serial number (AI 21)" required>
-          <input value={form.serial} onChange={(e) => set('serial', e.target.value)}
-            placeholder="A25L350981" className="form-input font-mono" />
+        <Field label="Serial number (AI 21) — nhập 3 ký tự đầu" required>
+          <input value={form.serial_prefix}
+            onChange={(e) => set('serial_prefix', e.target.value.toUpperCase().slice(0, 3))}
+            placeholder="A25" maxLength={3} className="form-input font-mono uppercase" />
+          <p className="text-xs text-gray-400 mt-1">Hệ thống tự sinh thêm 7 ký tự phía sau, ví dụ: A25L350981</p>
         </Field>
         <Field label="Tên sản phẩm">
           <input value={form.product_name} onChange={(e) => set('product_name', e.target.value)}
@@ -254,6 +266,11 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       </div>
 
       {error && <Alert kind="danger" icon={AlertTriangle}>{error}</Alert>}
+      {createdSerial && (
+        <Alert kind="success">
+          Đã tạo mã GS1 với serial: <span className="font-mono font-semibold">{createdSerial}</span>
+        </Alert>
+      )}
 
       <button type="submit" disabled={busy} className="btn-primary text-sm">
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}
