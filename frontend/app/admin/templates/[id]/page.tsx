@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2, BookmarkPlus, FolderDown } from 'lucide-react';
 import { api, fetchBlobUrl } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert } from '@/components/ui';
 
@@ -30,6 +30,19 @@ interface Template {
   qr_y_ratio: number;
   qr_size_ratio: number;
   is_gs1: boolean;
+  barcode_x_ratio: number;
+  barcode_y_ratio: number;
+  barcode_w_ratio: number;
+  barcode_h_ratio: number;
+  text_objects: TextObjectAPI[];
+}
+
+interface LayoutPreset {
+  id: number;
+  name: string;
+  qr_x_ratio: number;
+  qr_y_ratio: number;
+  qr_size_ratio: number;
   barcode_x_ratio: number;
   barcode_y_ratio: number;
   barcode_w_ratio: number;
@@ -114,6 +127,12 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
   const [textObjects, setTextObjects] = useState<TextObjState[]>([]);
   const [newFieldPick, setNewFieldPick] = useState('serial');
 
+  const [presets, setPresets] = useState<LayoutPreset[]>([]);
+  const [presetName, setPresetName] = useState('');
+  const [presetPick, setPresetPick] = useState<number | ''>('');
+  const [presetSaving, setPresetSaving] = useState(false);
+  const [presetMsg, setPresetMsg] = useState<string | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidthPx, setContainerWidthPx] = useState(0);
 
@@ -146,6 +165,12 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     });
     fetchBlobUrl(`/api/v1/admin/templates/${templateId}/preview`).then(setPreviewUrl).catch(() => {});
   }, [templateId]);
+
+  useEffect(() => {
+    api<LayoutPreset[]>('/api/v1/admin/label-layout-presets').then((r) => {
+      if (r.ok && r.data) setPresets(r.data);
+    });
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -261,6 +286,58 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     else setError(r.error || 'Lưu thất bại');
   }
 
+  async function saveAsPreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    setPresetSaving(true);
+    setPresetMsg(null);
+    const body = {
+      name,
+      qr_x_ratio: qr.x, qr_y_ratio: qr.y, qr_size_ratio: qr.size,
+      barcode_x_ratio: barcode.x, barcode_y_ratio: barcode.y,
+      barcode_w_ratio: barcode.w, barcode_h_ratio: barcode.h,
+      text_objects: textObjects.map((t) => ({
+        id: t.id, field: t.field, x_ratio: t.x, y_ratio: t.y, size_ratio: t.size,
+        weight: t.weight, rotate_180: t.rotate180,
+        date_format: DATE_FIELDS.has(t.field) ? (t.dateFormat || 'yymmdd') : undefined,
+      })),
+    };
+    const r = await api<{ id: number }>('/api/v1/admin/label-layout-presets', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    setPresetSaving(false);
+    if (r.ok && r.data) {
+      setPresets((list) => [{ id: r.data!.id, ...body }, ...list]);
+      setPresetName('');
+      setPresetMsg('Đã lưu mẫu vị trí.');
+    } else {
+      setPresetMsg(r.error || 'Lưu mẫu thất bại');
+    }
+  }
+
+  function applyPreset(id: number) {
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    setQr({ x: p.qr_x_ratio, y: p.qr_y_ratio, size: p.qr_size_ratio });
+    setBarcode({ x: p.barcode_x_ratio, y: p.barcode_y_ratio, w: p.barcode_w_ratio, h: p.barcode_h_ratio });
+    setTextObjects(
+      (p.text_objects || []).map((o) => ({
+        id: newObjectId(), field: o.field, x: o.x_ratio, y: o.y_ratio, size: o.size_ratio,
+        weight: o.weight || 'regular', rotate180: o.rotate_180, dateFormat: o.date_format || '',
+      }))
+    );
+    setPresetMsg(`Đã áp dụng mẫu "${p.name}". Nhớ bấm "Lưu vị trí" để lưu lại.`);
+  }
+
+  async function deletePreset(id: number) {
+    const r = await api(`/api/v1/admin/label-layout-presets/${id}`, { method: 'DELETE' });
+    if (r.ok) {
+      setPresets((list) => list.filter((p) => p.id !== id));
+      if (presetPick === id) setPresetPick('');
+    }
+  }
+
   if (error && !tpl) return <Alert kind="danger">{error}</Alert>;
   if (!tpl) return <Spinner />;
 
@@ -366,6 +443,65 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
         </div>
 
         <div className="space-y-4">
+          {tpl.is_gs1 && (
+            <div className="card p-4 space-y-3">
+              <h3 className="font-semibold text-sm text-gray-700">Mẫu vị trí đã lưu</h3>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="Tên mẫu mới…"
+                  className="flex-1 min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={saveAsPreset}
+                  disabled={presetSaving || !presetName.trim()}
+                  className="btn-secondary whitespace-nowrap"
+                  title="Lưu vị trí hiện tại thành mẫu"
+                >
+                  {presetSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookmarkPlus className="w-4 h-4" />}
+                  Lưu mẫu
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <select
+                  value={presetPick}
+                  onChange={(e) => setPresetPick(e.target.value ? Number(e.target.value) : '')}
+                  className="flex-1 min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                >
+                  <option value="">— Chọn mẫu để áp dụng —</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => presetPick !== '' && applyPreset(presetPick)}
+                  disabled={presetPick === ''}
+                  className="btn-secondary whitespace-nowrap"
+                  title="Áp dụng mẫu đã chọn"
+                >
+                  <FolderDown className="w-4 h-4" /> Áp dụng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => presetPick !== '' && deletePreset(presetPick)}
+                  disabled={presetPick === ''}
+                  className="flex items-center justify-center w-8 h-8 flex-shrink-0 rounded-md text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                  title="Xoá mẫu đã chọn"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              {presetMsg && <p className="text-xs text-gray-500">{presetMsg}</p>}
+            </div>
+          )}
+
           <RatioPanel title="QR" color="gov">
             <NumField label="Vị trí X (%)" value={qr.x} max={1 - qr.size}
               onChange={(v) => setQr((s) => ({ ...s, x: clamp(v, 0, 1 - s.size) }))} />

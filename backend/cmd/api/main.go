@@ -130,6 +130,7 @@ func main() {
 	gs1LabelExport := &handlers.GS1LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL, Tokens: tokenSvc}
 	gs1Verify := &handlers.GS1VerifyHandler{DB: pool, Redis: rdb, Tokens: tokenSvc, Geo: geo}
 	gs1SizeSpecs := &handlers.GS1SizeSpecHandler{DB: pool, Audit: audit}
+	labelLayoutPresets := &handlers.LabelLayoutPresetHandler{DB: pool, Audit: audit}
 
 	api := app.Group("/api/v1")
 
@@ -294,6 +295,11 @@ func main() {
 	protected.Patch("/templates/:id", templates.Update)
 	protected.Delete("/templates/:id", templates.Delete)
 	protected.Get("/templates/:id/preview", templates.Preview)
+
+	// Saved GS1 object-position layouts (reuse a finished arrangement on another template)
+	protected.Get("/label-layout-presets", labelLayoutPresets.List)
+	protected.Post("/label-layout-presets", labelLayoutPresets.Create)
+	protected.Delete("/label-layout-presets/:id", labelLayoutPresets.Delete)
 
 	addr := ":" + strings.TrimPrefix(cfg.AppPort, ":")
 	fmt.Printf("🚀 TrustQR API listening on %s (env=%s)\n", addr, cfg.AppEnv)
