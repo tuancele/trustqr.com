@@ -2,9 +2,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Save, QrCode, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2 } from 'lucide-react';
 import { api, fetchBlobUrl } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert } from '@/components/ui';
+
+interface TextObjectAPI {
+  id: string;
+  field: string;
+  x_ratio: number;
+  y_ratio: number;
+  size_ratio: number;
+  bold: boolean;
+  rotate_180: boolean;
+}
 
 interface Template {
   id: number;
@@ -20,23 +30,56 @@ interface Template {
   barcode_y_ratio: number;
   barcode_w_ratio: number;
   barcode_h_ratio: number;
-  text1_x_ratio: number;
-  text1_y_ratio: number;
-  text1_size_ratio: number;
-  text2_x_ratio: number;
-  text2_y_ratio: number;
-  text2_size_ratio: number;
+  text_objects: TextObjectAPI[];
 }
 
 interface QRState { x: number; y: number; size: number; }
 interface BoxState { x: number; y: number; w: number; h: number; }
-interface TextState { x: number; y: number; size: number; }
+interface TextObjState {
+  id: string;
+  field: string;
+  x: number;
+  y: number;
+  size: number;
+  bold: boolean;
+  rotate180: boolean;
+}
 
-type DragTarget = 'qr' | 'barcode' | 'text1' | 'text2';
+type DragTarget = 'qr' | 'barcode' | string;
 type DragMode = 'move' | 'resize';
+
+const FIELD_LABELS: Record<string, string> = {
+  gtin: 'GTIN (AI 01)',
+  lot: 'Lô (AI 10)',
+  serial: 'Serial (AI 21)',
+  manufacture_date: 'Ngày SX (AI 11)',
+  expiry_date: 'HSD (AI 17)',
+  product_code: 'Mã sản phẩm',
+  spec: 'Quy cách',
+  size_spec: 'Kích thước',
+};
+
+const DEMO_VALUES: Record<string, string> = {
+  gtin: '08809460304701',
+  lot: 'R02511110020',
+  serial: 'A25L350981',
+  manufacture_date: '17/8/2026',
+  expiry_date: '17/8/2031',
+  product_code: 'C010400955',
+  spec: 'FXS4508',
+  size_spec: '4.0mm(⌀) X 10.0mm(L)',
+};
+
+const FIELD_OPTIONS = Object.keys(FIELD_LABELS);
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(Math.max(v, min), Math.max(min, max));
+}
+
+function newObjectId() {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `obj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export default function TemplatePositionPage({ params }: { params: { id: string } }) {
@@ -49,8 +92,8 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
 
   const [qr, setQr] = useState<QRState>({ x: 0.65, y: 0.65, size: 0.25 });
   const [barcode, setBarcode] = useState<BoxState>({ x: 0.1, y: 0.42, w: 0.55, h: 0.18 });
-  const [text1, setText1] = useState<TextState>({ x: 0.1, y: 0.61, size: 0.045 });
-  const [text2, setText2] = useState<TextState>({ x: 0.1, y: 0.9, size: 0.045 });
+  const [textObjects, setTextObjects] = useState<TextObjState[]>([]);
+  const [newFieldPick, setNewFieldPick] = useState('serial');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidthPx, setContainerWidthPx] = useState(0);
@@ -62,7 +105,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     startClientY: number;
     startQR: QRState;
     startBarcode: BoxState;
-    startText: TextState;
+    startText: TextObjState | null;
   } | null>(null);
 
   useEffect(() => {
@@ -72,8 +115,12 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
         setTpl(t);
         setQr({ x: t.qr_x_ratio, y: t.qr_y_ratio, size: t.qr_size_ratio });
         setBarcode({ x: t.barcode_x_ratio, y: t.barcode_y_ratio, w: t.barcode_w_ratio, h: t.barcode_h_ratio });
-        setText1({ x: t.text1_x_ratio, y: t.text1_y_ratio, size: t.text1_size_ratio });
-        setText2({ x: t.text2_x_ratio, y: t.text2_y_ratio, size: t.text2_size_ratio });
+        setTextObjects(
+          (t.text_objects || []).map((o) => ({
+            id: o.id, field: o.field, x: o.x_ratio, y: o.y_ratio, size: o.size_ratio,
+            bold: o.bold, rotate180: o.rotate_180,
+          }))
+        );
       } else {
         setError(r.error || 'Không tải được mẫu tem');
       }
@@ -94,6 +141,26 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
   const aspectWH = tpl ? tpl.width_mm / tpl.height_mm : 1;
   const qrHeightRatio = clamp(qr.size * aspectWH, 0, 1);
 
+  function updateTextObject(id: string, patch: Partial<TextObjState>) {
+    setTextObjects((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }
+
+  function addTextObject() {
+    const count = textObjects.length;
+    setTextObjects((list) => [
+      ...list,
+      {
+        id: newObjectId(), field: newFieldPick,
+        x: 0.1, y: clamp(0.1 + count * 0.06, 0, 0.9), size: 0.045,
+        bold: false, rotate180: false,
+      },
+    ]);
+  }
+
+  function removeTextObject(id: string) {
+    setTextObjects((list) => list.filter((t) => t.id !== id));
+  }
+
   function onBoxPointerDown(e: React.PointerEvent, target: DragTarget, mode: DragMode) {
     e.preventDefault();
     e.stopPropagation();
@@ -101,7 +168,8 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     dragRef.current = {
       target, mode,
       startClientX: e.clientX, startClientY: e.clientY,
-      startQR: qr, startBarcode: barcode, startText: target === 'text1' ? text1 : text2,
+      startQR: qr, startBarcode: barcode,
+      startText: textObjects.find((t) => t.id === target) || null,
     };
   }
 
@@ -133,13 +201,12 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
           h: clamp(s.h + dy, 0.02, 1 - s.y),
         });
       }
-    } else {
+    } else if (drag.startText) {
       const s = drag.startText;
-      const setter = drag.target === 'text1' ? setText1 : setText2;
       if (drag.mode === 'move') {
-        setter({ ...s, x: clamp(s.x + dx, 0, 1), y: clamp(s.y + dy, 0, 1) });
+        updateTextObject(drag.target, { x: clamp(s.x + dx, 0, 1), y: clamp(s.y + dy, 0, 1) });
       } else {
-        setter({ ...s, size: clamp(s.size + dx, 0.01, 0.3) });
+        updateTextObject(drag.target, { size: clamp(s.size + dx, 0.01, 0.3) });
       }
     }
   }
@@ -152,7 +219,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     if (!tpl) return;
     setSaving(true);
     setSavedMsg(null);
-    const body: Record<string, number> = {
+    const body: Record<string, unknown> = {
       qr_x_ratio: qr.x, qr_y_ratio: qr.y, qr_size_ratio: qr.size,
     };
     if (tpl.is_gs1) {
@@ -160,12 +227,10 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
       body.barcode_y_ratio = barcode.y;
       body.barcode_w_ratio = barcode.w;
       body.barcode_h_ratio = barcode.h;
-      body.text1_x_ratio = text1.x;
-      body.text1_y_ratio = text1.y;
-      body.text1_size_ratio = text1.size;
-      body.text2_x_ratio = text2.x;
-      body.text2_y_ratio = text2.y;
-      body.text2_size_ratio = text2.size;
+      body.text_objects = textObjects.map((t) => ({
+        id: t.id, field: t.field, x_ratio: t.x, y_ratio: t.y, size_ratio: t.size,
+        bold: t.bold, rotate_180: t.rotate180,
+      }));
     }
     const r = await api(`/api/v1/admin/templates/${tpl.id}`, {
       method: 'PATCH',
@@ -263,16 +328,18 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
                   />
                 </div>
 
-                <TextBox
-                  label="Serial 1" state={text1} color="amber" containerWidthPx={containerWidthPx}
-                  onMoveDown={(e) => onBoxPointerDown(e, 'text1', 'move')}
-                  onResizeDown={(e) => onBoxPointerDown(e, 'text1', 'resize')}
-                />
-                <TextBox
-                  label="Serial 2" state={text2} color="emerald" containerWidthPx={containerWidthPx}
-                  onMoveDown={(e) => onBoxPointerDown(e, 'text2', 'move')}
-                  onResizeDown={(e) => onBoxPointerDown(e, 'text2', 'resize')}
-                />
+                {textObjects.map((t, i) => (
+                  <TextBox
+                    key={t.id}
+                    label={FIELD_LABELS[t.field] || t.field}
+                    value={DEMO_VALUES[t.field] || t.field}
+                    state={t}
+                    colorKey={TEXT_COLOR_KEYS[i % TEXT_COLOR_KEYS.length]}
+                    containerWidthPx={containerWidthPx}
+                    onMoveDown={(e) => onBoxPointerDown(e, t.id, 'move')}
+                    onResizeDown={(e) => onBoxPointerDown(e, t.id, 'resize')}
+                  />
+                ))}
               </>
             )}
           </div>
@@ -304,19 +371,68 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
                   onChange={(v) => setBarcode((s) => ({ ...s, h: clamp(v, 0.02, 1) }))} />
               </RatioPanel>
 
-              <RatioPanel title="Text — Serial 1" color="amber">
-                <NumField label="Vị trí X (%)" value={text1.x} onChange={(v) => setText1((s) => ({ ...s, x: clamp(v, 0, 1) }))} />
-                <NumField label="Vị trí Y (%)" value={text1.y} onChange={(v) => setText1((s) => ({ ...s, y: clamp(v, 0, 1) }))} />
-                <NumField label="Cỡ chữ (% chiều rộng tem)" value={text1.size} min={0.01} max={0.3}
-                  onChange={(v) => setText1((s) => ({ ...s, size: clamp(v, 0.01, 0.3) }))} />
-              </RatioPanel>
+              <div className="card p-4 space-y-2">
+                <label className="block text-xs font-medium text-gray-600">Thêm trường vị trí</label>
+                <div className="flex gap-2">
+                  <select
+                    value={newFieldPick}
+                    onChange={(e) => setNewFieldPick(e.target.value)}
+                    className="form-input flex-1"
+                  >
+                    {FIELD_OPTIONS.map((f) => (
+                      <option key={f} value={f}>{FIELD_LABELS[f]}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={addTextObject} className="btn-secondary whitespace-nowrap">
+                    <Plus className="w-3.5 h-3.5" /> Thêm
+                  </button>
+                </div>
+              </div>
 
-              <RatioPanel title="Text — Serial 2" color="emerald">
-                <NumField label="Vị trí X (%)" value={text2.x} onChange={(v) => setText2((s) => ({ ...s, x: clamp(v, 0, 1) }))} />
-                <NumField label="Vị trí Y (%)" value={text2.y} onChange={(v) => setText2((s) => ({ ...s, y: clamp(v, 0, 1) }))} />
-                <NumField label="Cỡ chữ (% chiều rộng tem)" value={text2.size} min={0.01} max={0.3}
-                  onChange={(v) => setText2((s) => ({ ...s, size: clamp(v, 0.01, 0.3) }))} />
-              </RatioPanel>
+              {textObjects.map((t, i) => {
+                const colorKey = TEXT_COLOR_KEYS[i % TEXT_COLOR_KEYS.length];
+                return (
+                  <RatioPanel key={t.id} title={FIELD_LABELS[t.field] || t.field} color={colorKey}
+                    actions={
+                      <button type="button" onClick={() => removeTextObject(t.id)}
+                        className="text-gray-400 hover:text-red-600">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    }
+                  >
+                    <NumField label="Vị trí X (%)" value={t.x} onChange={(v) => updateTextObject(t.id, { x: clamp(v, 0, 1) })} />
+                    <NumField label="Vị trí Y (%)" value={t.y} onChange={(v) => updateTextObject(t.id, { y: clamp(v, 0, 1) })} />
+                    <NumField label="Cỡ chữ (% chiều rộng tem)" value={t.size} min={0.01} max={0.3}
+                      onChange={(v) => updateTextObject(t.id, { size: clamp(v, 0.01, 0.3) })} />
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Kiểu chữ (Arial)</label>
+                      <div className="flex gap-1.5">
+                        <button type="button" onClick={() => updateTextObject(t.id, { bold: false })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${!t.bold ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                          Regular
+                        </button>
+                        <button type="button" onClick={() => updateTextObject(t.id, { bold: true })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-bold border ${t.bold ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                          Bold
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Hướng chữ</label>
+                      <div className="flex gap-1.5">
+                        <button type="button" onClick={() => updateTextObject(t.id, { rotate180: false })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${!t.rotate180 ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                          Bình thường
+                        </button>
+                        <button type="button" onClick={() => updateTextObject(t.id, { rotate180: true })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${t.rotate180 ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                          Ngược 180°
+                        </button>
+                      </div>
+                    </div>
+                  </RatioPanel>
+                );
+              })}
             </>
           )}
         </div>
@@ -325,57 +441,87 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
   );
 }
 
+const TEXT_COLOR_KEYS = ['amber', 'emerald', 'rose', 'cyan', 'fuchsia', 'lime', 'sky', 'orange'] as const;
+type TextColorKey = (typeof TEXT_COLOR_KEYS)[number];
+
+const TEXT_COLOR_STYLES: Record<TextColorKey, { border: string; bg: string; text: string; dot: string }> = {
+  amber: { border: 'border-amber-500', bg: 'bg-amber-500/20', text: 'text-amber-700', dot: 'bg-amber-600' },
+  emerald: { border: 'border-emerald-500', bg: 'bg-emerald-500/20', text: 'text-emerald-700', dot: 'bg-emerald-600' },
+  rose: { border: 'border-rose-500', bg: 'bg-rose-500/20', text: 'text-rose-700', dot: 'bg-rose-600' },
+  cyan: { border: 'border-cyan-500', bg: 'bg-cyan-500/20', text: 'text-cyan-700', dot: 'bg-cyan-600' },
+  fuchsia: { border: 'border-fuchsia-500', bg: 'bg-fuchsia-500/20', text: 'text-fuchsia-700', dot: 'bg-fuchsia-600' },
+  lime: { border: 'border-lime-500', bg: 'bg-lime-500/20', text: 'text-lime-700', dot: 'bg-lime-600' },
+  sky: { border: 'border-sky-500', bg: 'bg-sky-500/20', text: 'text-sky-700', dot: 'bg-sky-600' },
+  orange: { border: 'border-orange-500', bg: 'bg-orange-500/20', text: 'text-orange-700', dot: 'bg-orange-600' },
+};
+
 function TextBox({
-  label, state, color, containerWidthPx, onMoveDown, onResizeDown,
+  label, value, state, colorKey, containerWidthPx, onMoveDown, onResizeDown,
 }: {
   label: string;
-  state: TextState;
-  color: 'amber' | 'emerald';
+  value: string;
+  state: TextObjState;
+  colorKey: TextColorKey;
   containerWidthPx: number;
   onMoveDown: (e: React.PointerEvent) => void;
   onResizeDown: (e: React.PointerEvent) => void;
 }) {
-  const border = color === 'amber' ? 'border-amber-500' : 'border-emerald-500';
-  const bg = color === 'amber' ? 'bg-amber-500/20' : 'bg-emerald-500/20';
-  const text = color === 'amber' ? 'text-amber-700' : 'text-emerald-700';
-  const dot = color === 'amber' ? 'bg-amber-600' : 'bg-emerald-600';
+  const c = TEXT_COLOR_STYLES[colorKey];
   const fontSizePx = Math.max(state.size * containerWidthPx, 8);
   return (
     <div
-      className={`absolute border-2 ${border} ${bg} cursor-move flex items-center px-1 whitespace-nowrap`}
+      className={`absolute border-2 ${c.border} ${c.bg} cursor-move flex items-center px-1 whitespace-nowrap`}
       style={{ left: `${state.x * 100}%`, top: `${state.y * 100}%` }}
       onPointerDown={onMoveDown}
     >
-      <span
-        className={`font-mono font-semibold ${text} pointer-events-none`}
-        style={{ fontSize: `${fontSizePx}px`, lineHeight: 1.1 }}
-      >
+      <span className={`text-[9px] font-semibold ${c.text} bg-white/80 px-1 rounded pointer-events-none absolute -top-4 left-0`}>
         {label}
       </span>
+      <span
+        className={`${c.text} pointer-events-none`}
+        style={{
+          fontSize: `${fontSizePx}px`,
+          lineHeight: 1.1,
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontWeight: state.bold ? 700 : 400,
+          transform: state.rotate180 ? 'rotate(180deg)' : undefined,
+        }}
+      >
+        {value}
+      </span>
       <div
-        className={`absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 ${dot} rounded-full border-2 border-white cursor-nwse-resize`}
+        className={`absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 ${c.dot} rounded-full border-2 border-white cursor-nwse-resize`}
         onPointerDown={onResizeDown}
       />
     </div>
   );
 }
 
-const RATIO_PANEL_COLORS = {
+const RATIO_PANEL_COLORS: Record<'gov' | 'violet' | TextColorKey, { text: string; dot: string }> = {
   gov: { text: 'text-gov-700', dot: 'bg-gov-500' },
   violet: { text: 'text-violet-700', dot: 'bg-violet-500' },
-  amber: { text: 'text-amber-700', dot: 'bg-amber-500' },
-  emerald: { text: 'text-emerald-700', dot: 'bg-emerald-500' },
-} as const;
+  amber: { text: TEXT_COLOR_STYLES.amber.text, dot: TEXT_COLOR_STYLES.amber.dot },
+  emerald: { text: TEXT_COLOR_STYLES.emerald.text, dot: TEXT_COLOR_STYLES.emerald.dot },
+  rose: { text: TEXT_COLOR_STYLES.rose.text, dot: TEXT_COLOR_STYLES.rose.dot },
+  cyan: { text: TEXT_COLOR_STYLES.cyan.text, dot: TEXT_COLOR_STYLES.cyan.dot },
+  fuchsia: { text: TEXT_COLOR_STYLES.fuchsia.text, dot: TEXT_COLOR_STYLES.fuchsia.dot },
+  lime: { text: TEXT_COLOR_STYLES.lime.text, dot: TEXT_COLOR_STYLES.lime.dot },
+  sky: { text: TEXT_COLOR_STYLES.sky.text, dot: TEXT_COLOR_STYLES.sky.dot },
+  orange: { text: TEXT_COLOR_STYLES.orange.text, dot: TEXT_COLOR_STYLES.orange.dot },
+};
 
 function RatioPanel({
-  title, color, children,
-}: { title: string; color: keyof typeof RATIO_PANEL_COLORS; children: React.ReactNode }) {
+  title, color, actions, children,
+}: { title: string; color: keyof typeof RATIO_PANEL_COLORS; actions?: React.ReactNode; children: React.ReactNode }) {
   const c = RATIO_PANEL_COLORS[color];
   return (
     <div className="card p-4 space-y-3">
-      <h3 className={`font-semibold text-sm flex items-center gap-1.5 ${c.text}`}>
-        <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} /> {title}
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className={`font-semibold text-sm flex items-center gap-1.5 ${c.text}`}>
+          <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} /> {title}
+        </h3>
+        {actions}
+      </div>
       {children}
     </div>
   );

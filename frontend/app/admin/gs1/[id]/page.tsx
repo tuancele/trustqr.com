@@ -22,6 +22,7 @@ interface GS1LabelDetail {
   product_name: string | null;
   product_code: string | null;
   spec: string | null;
+  size_spec: string | null;
   unit: string | null;
   manufacturer: string | null;
   origin_country: string | null;
@@ -144,6 +145,7 @@ function OverviewTab({ data, imgSrc, onSaved }: { data: GS1LabelDetail; imgSrc: 
             <Row label="HSD (AI 17)" value={data.expiry_date ? fmtDateShort(data.expiry_date) : null} />
             <Row label="Mã sản phẩm" value={data.product_code} />
             <Row label="Quy cách" value={data.spec} />
+            <Row label="Kích thước" value={data.size_spec} />
             <Row label="Đơn vị" value={data.unit} />
             <Row label="Hãng sản xuất" value={data.manufacturer} />
             <Row label="Xuất xứ" value={data.origin_country} />
@@ -186,7 +188,7 @@ function OverviewTab({ data, imgSrc, onSaved }: { data: GS1LabelDetail; imgSrc: 
 // ============ Edit form (reuses the same fields as create) ============
 const editableKeys = [
   'gtin', 'manufacture_date', 'expiry_date', 'lot', 'serial',
-  'product_name', 'product_code', 'spec', 'unit', 'manufacturer', 'origin_country',
+  'product_name', 'product_code', 'spec', 'size_spec', 'unit', 'manufacturer', 'origin_country',
 ] as const;
 type EditFormState = Record<(typeof editableKeys)[number], string>;
 
@@ -256,6 +258,9 @@ function EditForm({ data, onCancel, onSaved }: { data: GS1LabelDetail; onCancel:
         </EField>
         <EField label="Quy cách">
           <input value={form.spec} onChange={(e) => set('spec', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Kích thước">
+          <input value={form.size_spec} onChange={(e) => set('size_spec', e.target.value)} className="form-input" />
         </EField>
         <EField label="Đơn vị">
           <input value={form.unit} onChange={(e) => set('unit', e.target.value)} className="form-input" />

@@ -20,6 +20,7 @@ interface GS1Label {
   product_name: string | null;
   product_code: string | null;
   spec: string | null;
+  size_spec: string | null;
   unit: string | null;
   manufacturer: string | null;
   origin_country: string | null;
@@ -166,7 +167,7 @@ export default function GS1LabelsPage() {
 // ============ Create form ============
 const emptyForm = {
   gtin: '', manufacture_date: '', expiry_date: '', lot: '', serial_prefix: '',
-  product_name: '', product_code: '', spec: '', unit: '', manufacturer: '', origin_country: '',
+  product_name: '', product_code: '', spec: '', size_spec: '', unit: '', manufacturer: '', origin_country: '',
 };
 const SERIAL_PREFIX_RE = /^[A-Z0-9]{3}$/;
 
@@ -247,6 +248,10 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         <Field label="Quy cách">
           <input value={form.spec} onChange={(e) => set('spec', e.target.value)}
             placeholder="FXS4508" className="form-input" />
+        </Field>
+        <Field label="Kích thước">
+          <input value={form.size_spec} onChange={(e) => set('size_spec', e.target.value)}
+            placeholder="4.0mm(⌀) X 10.0mm(L)" className="form-input" />
         </Field>
         <Field label="Đơn vị">
           <input value={form.unit} onChange={(e) => set('unit', e.target.value)}

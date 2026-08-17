@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -42,18 +43,22 @@ type labelTemplateInfo struct {
 
 func loadLabelTemplate(ctx context.Context, db *pgxpool.Pool, id int64) (*labelTemplateInfo, error) {
 	var t labelTemplateInfo
+	var textObjectsRaw []byte
 	err := db.QueryRow(ctx, `
 		SELECT id, width_mm, height_mm, file_type, file_path, qr_x_ratio, qr_y_ratio, qr_size_ratio,
-			is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio,
-			text1_x_ratio, text1_y_ratio, text1_size_ratio, text2_x_ratio, text2_y_ratio, text2_size_ratio
+			is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects
 		FROM label_templates WHERE id = $1`, id).Scan(
 		&t.ID, &t.WidthMM, &t.HeightMM, &t.FileType, &t.FilePath,
 		&t.QRXRatio, &t.QRYRatio, &t.QRSizeRatio, &t.IsGS1,
 		&t.GS1Layout.BarcodeXRatio, &t.GS1Layout.BarcodeYRatio, &t.GS1Layout.BarcodeWRatio, &t.GS1Layout.BarcodeHRatio,
-		&t.GS1Layout.Text1XRatio, &t.GS1Layout.Text1YRatio, &t.GS1Layout.Text1SizeRatio,
-		&t.GS1Layout.Text2XRatio, &t.GS1Layout.Text2YRatio, &t.GS1Layout.Text2SizeRatio)
+		&textObjectsRaw)
 	if err != nil {
 		return nil, err
+	}
+	if len(textObjectsRaw) > 0 {
+		if err := json.Unmarshal(textObjectsRaw, &t.GS1Layout.TextObjects); err != nil {
+			return nil, fmt.Errorf("parse text_objects: %w", err)
+		}
 	}
 	return &t, nil
 }

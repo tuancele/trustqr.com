@@ -129,26 +129,42 @@ func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, l
 	return buf.Bytes(), nil
 }
 
+// TextObjectConfig positions one human-readable text field on a GS1 label
+// template. Field is a key into the fieldValues map passed to
+// RenderTiledGS1PDF/InjectGS1ObjectsIntoSVG (gtin, lot, serial,
+// manufacture_date, expiry_date, product_code, spec, size_spec). Multiple
+// TextObjects may share the same Field (e.g. the serial is shown twice on
+// one sticker, styled differently each time).
+type TextObjectConfig struct {
+	ID        string  `json:"id"`
+	Field     string  `json:"field"`
+	XRatio    float64 `json:"x_ratio"`
+	YRatio    float64 `json:"y_ratio"`
+	SizeRatio float64 `json:"size_ratio"`
+	Bold      bool    `json:"bold"`
+	Rotate180 bool    `json:"rotate_180"`
+}
+
 // GS1Layout groups the position ratios for the extra objects a GS1 label
 // template composites alongside the QR: a Code128 barcode (independent
-// width/height ratios, since unlike QR it isn't square-locked) and two
-// copies of the serial as human-readable text — one physical sticker has 2
-// spots that must both show the same serial value.
+// width/height ratios, since unlike QR it isn't square-locked) and an
+// arbitrary list of positioned text fields.
 type GS1Layout struct {
 	BarcodeXRatio, BarcodeYRatio, BarcodeWRatio, BarcodeHRatio float64
-	Text1XRatio, Text1YRatio, Text1SizeRatio                   float64
-	Text2XRatio, Text2YRatio, Text2SizeRatio                   float64
+	TextObjects                                                []TextObjectConfig
 }
 
 const mmToPt = 2.834645669
 
-// RenderTiledGS1PDF is RenderTiledPDF plus a barcode image and two copies of
-// serialText composited into every cell. Unlike the per-unit QR, the
-// barcode/text are the same for every physical copy in a print run (a GS1
-// label's serial is defined once, at the label level), so they're
-// registered/drawn once and reused across cells the same way the template
-// image itself is.
-func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, serialText string, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+// RenderTiledGS1PDF is RenderTiledPDF plus a barcode image and the
+// template's positioned text objects composited into every cell. Unlike the
+// per-unit QR, the barcode/text are the same for every physical copy in a
+// print run (a GS1 label's fields are defined once, at the label level), so
+// they're registered/drawn once and reused across cells the same way the
+// template image itself is. fieldValues supplies the human-readable string
+// for each TextObjectConfig.Field; objects whose field has no value (empty
+// string or missing key) are skipped.
+func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues map[string]string, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -195,13 +211,6 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 	barcodeW := layout.BarcodeWRatio * labelW
 	barcodeH := layout.BarcodeHRatio * labelH
 
-	text1X := layout.Text1XRatio * labelW
-	text1Y := layout.Text1YRatio * labelH
-	text1SizeMM := layout.Text1SizeRatio * labelW
-	text2X := layout.Text2XRatio * labelW
-	text2Y := layout.Text2YRatio * labelH
-	text2SizeMM := layout.Text2SizeRatio * labelW
-
 	perPage := grid.Cols * grid.Rows
 	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
 
@@ -218,14 +227,34 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
 		pdf.ImageOptions("barcode", cellX+barcodeX, cellY+barcodeY, barcodeW, barcodeH, false, barcodeOpts, 0, "")
 
-		// pdf.Text's y is the text baseline; adding the font's mm height to
-		// the ratio-derived top offset approximates a top-left anchor, so
-		// text1/text2 line up with the barcode/QR boxes the same way the
-		// position editor shows them (top-left origin).
-		pdf.SetFont("Helvetica", "", text1SizeMM*mmToPt)
-		pdf.Text(cellX+text1X, cellY+text1Y+text1SizeMM, serialText)
-		pdf.SetFont("Helvetica", "", text2SizeMM*mmToPt)
-		pdf.Text(cellX+text2X, cellY+text2Y+text2SizeMM, serialText)
+		for _, obj := range layout.TextObjects {
+			val := fieldValues[obj.Field]
+			if val == "" {
+				continue
+			}
+			sizeMM := obj.SizeRatio * labelW
+			fontStyle := ""
+			if obj.Bold {
+				fontStyle = "B"
+			}
+			pdf.SetFont("Helvetica", fontStyle, sizeMM*mmToPt)
+			// pdf.Text's y is the text baseline; adding the font's mm height
+			// to the ratio-derived top offset approximates a top-left
+			// anchor, so objects line up with the barcode/QR boxes the same
+			// way the position editor shows them (top-left origin).
+			tx := cellX + obj.XRatio*labelW
+			ty := cellY + obj.YRatio*labelH + sizeMM
+			if obj.Rotate180 {
+				cx := tx + pdf.GetStringWidth(val)/2
+				cy := ty - sizeMM/2
+				pdf.TransformBegin()
+				pdf.TransformRotate(180, cx, cy)
+				pdf.Text(tx, ty, val)
+				pdf.TransformEnd()
+			} else {
+				pdf.Text(tx, ty, val)
+			}
+		}
 
 		qrPNG, err := imageFn(tok)
 		if err != nil {
@@ -280,14 +309,16 @@ func InjectQRIntoSVG(svgBytes, qrPNG []byte, xRatio, yRatio, sizeRatio, widthMM,
 	return out, nil
 }
 
-// InjectGS1ObjectsIntoSVG is InjectQRIntoSVG plus a barcode <image> and two
-// serial <text> elements, the SVG-export equivalent of RenderTiledGS1PDF's
-// compositing for GS1-flagged templates. Text position/size use the same
-// percentage-of-viewport convention as the image elements (per the SVG spec,
-// percentage lengths on properties like font-size resolve against the
-// viewport's normalized diagonal), so it stays consistent with the rest of
-// this file's resolution-independent approach.
-func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, serialText string, widthMM, heightMM float64) ([]byte, error) {
+// InjectGS1ObjectsIntoSVG is InjectQRIntoSVG plus a barcode <image> and the
+// template's positioned text objects, the SVG-export equivalent of
+// RenderTiledGS1PDF's compositing for GS1-flagged templates. Text
+// position/size use the same percentage-of-viewport convention as the image
+// elements (per the SVG spec, percentage lengths on properties like
+// font-size resolve against the viewport's normalized diagonal), so it stays
+// consistent with the rest of this file's resolution-independent approach.
+// fieldValues supplies the human-readable string for each
+// TextObjectConfig.Field; objects whose field has no value are skipped.
+func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues map[string]string, widthMM, heightMM float64) ([]byte, error) {
 	const closeTag = "</svg>"
 	idx := bytes.LastIndex(svgBytes, []byte(closeTag))
 	if idx == -1 {
@@ -307,11 +338,22 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 	fmt.Fprintf(&els, `<image x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" href="data:image/png;base64,%s" preserveAspectRatio="none"/>`,
 		layout.BarcodeXRatio*100, layout.BarcodeYRatio*100, layout.BarcodeWRatio*100, layout.BarcodeHRatio*100, base64.StdEncoding.EncodeToString(barcodePNG))
 
-	escaped := escapeXMLText(serialText)
-	fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="monospace" dominant-baseline="hanging">%s</text>`,
-		layout.Text1XRatio*100, layout.Text1YRatio*100, layout.Text1SizeRatio*100, escaped)
-	fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="monospace" dominant-baseline="hanging">%s</text>`,
-		layout.Text2XRatio*100, layout.Text2YRatio*100, layout.Text2SizeRatio*100, escaped)
+	for _, obj := range layout.TextObjects {
+		val := fieldValues[obj.Field]
+		if val == "" {
+			continue
+		}
+		fontWeight := "normal"
+		if obj.Bold {
+			fontWeight = "bold"
+		}
+		var transform string
+		if obj.Rotate180 {
+			transform = fmt.Sprintf(` transform="rotate(180, %.4f%%, %.4f%%)"`, obj.XRatio*100, obj.YRatio*100)
+		}
+		fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="Arial, Helvetica, sans-serif" font-weight="%s" dominant-baseline="hanging"%s>%s</text>`,
+			obj.XRatio*100, obj.YRatio*100, obj.SizeRatio*100, fontWeight, transform, escapeXMLText(val))
+	}
 
 	out := make([]byte, 0, len(svgBytes)+els.Len())
 	out = append(out, svgBytes[:idx]...)

@@ -39,6 +39,7 @@ type gs1LabelReq struct {
 	ProductName     string `json:"product_name"`
 	ProductCode     string `json:"product_code"`
 	Spec            string `json:"spec"`
+	SizeSpec        string `json:"size_spec"`
 	Unit            string `json:"unit"`
 	Manufacturer    string `json:"manufacturer"`
 	OriginCountry   string `json:"origin_country"`
@@ -55,6 +56,7 @@ type gs1LabelRow struct {
 	ProductName     *string    `json:"product_name"`
 	ProductCode     *string    `json:"product_code"`
 	Spec            *string    `json:"spec"`
+	SizeSpec        *string    `json:"size_spec"`
 	Unit            *string    `json:"unit"`
 	Manufacturer    *string    `json:"manufacturer"`
 	OriginCountry   *string    `json:"origin_country"`
@@ -63,12 +65,12 @@ type gs1LabelRow struct {
 }
 
 const gs1LabelColumns = `id, gtin, manufacture_date, expiry_date, lot, serial,
-	product_name, product_code, spec, unit, manufacturer, origin_country, brand_id, created_at`
+	product_name, product_code, spec, size_spec, unit, manufacturer, origin_country, brand_id, created_at`
 
 func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 	var r gs1LabelRow
 	err := row.Scan(&r.ID, &r.GTIN, &r.ManufactureDate, &r.ExpiryDate, &r.Lot, &r.Serial,
-		&r.ProductName, &r.ProductCode, &r.Spec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.BrandID, &r.CreatedAt)
+		&r.ProductName, &r.ProductCode, &r.Spec, &r.SizeSpec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.BrandID, &r.CreatedAt)
 	return r, err
 }
 
@@ -146,10 +148,10 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 
 	row := h.DB.QueryRow(ctx, `
 		INSERT INTO gs1_labels (gtin, manufacture_date, expiry_date, lot, serial,
-			product_name, product_code, spec, unit, manufacturer, origin_country, brand_id)
-		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), $12)
+			product_name, product_code, spec, size_spec, unit, manufacturer, origin_country, brand_id)
+		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), $13)
 		RETURNING `+gs1LabelColumns, req.GTIN, mfg, req.ExpiryDate, req.Lot, req.Serial,
-		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID)
+		req.ProductName, req.ProductCode, req.Spec, req.SizeSpec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID)
 
 	r, err := scanGS1LabelRow(row)
 	if err != nil {
@@ -181,11 +183,11 @@ func (h *GS1LabelHandler) UpdateLabel(c *fiber.Ctx) error {
 	row := h.DB.QueryRow(ctx, `
 		UPDATE gs1_labels SET
 			gtin = $1, manufacture_date = $2, expiry_date = NULLIF($3,'')::DATE, lot = $4, serial = $5,
-			product_name = NULLIF($6,''), product_code = NULLIF($7,''), spec = NULLIF($8,''),
-			unit = NULLIF($9,''), manufacturer = NULLIF($10,''), origin_country = NULLIF($11,''), brand_id = $12
-		WHERE id = $13
+			product_name = NULLIF($6,''), product_code = NULLIF($7,''), spec = NULLIF($8,''), size_spec = NULLIF($9,''),
+			unit = NULLIF($10,''), manufacturer = NULLIF($11,''), origin_country = NULLIF($12,''), brand_id = $13
+		WHERE id = $14
 		RETURNING `+gs1LabelColumns, req.GTIN, mfg, req.ExpiryDate, req.Lot, req.Serial,
-		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID, id)
+		req.ProductName, req.ProductCode, req.Spec, req.SizeSpec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID, id)
 
 	r, err := scanGS1LabelRow(row)
 	if err != nil {

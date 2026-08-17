@@ -48,20 +48,62 @@ type GS1LabelExportHandler struct {
 	Tokens        *services.TokenService
 }
 
-func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (services.GS1Fields, error) {
-	var f services.GS1Fields
+// gs1ExportFields is everything a print export can composite onto a label
+// template: the GS1Fields used for the DataMatrix element string / barcode,
+// plus the descriptive fields (product code, spec, size spec) that only
+// exist as positionable text objects.
+type gs1ExportFields struct {
+	services.GS1Fields
+	ProductCode string
+	Spec        string
+	SizeSpec    string
+}
+
+func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (gs1ExportFields, error) {
+	var f gs1ExportFields
 	var expiry *time.Time
+	var productCode, spec, sizeSpec *string
 	err := db.QueryRow(ctx, `
-		SELECT gtin, manufacture_date, expiry_date, lot, serial
+		SELECT gtin, manufacture_date, expiry_date, lot, serial, product_code, spec, size_spec
 		FROM gs1_labels WHERE id = $1`, id,
-	).Scan(&f.GTIN, &f.ManufactureDate, &expiry, &f.Lot, &f.Serial)
+	).Scan(&f.GTIN, &f.ManufactureDate, &expiry, &f.Lot, &f.Serial, &productCode, &spec, &sizeSpec)
 	if err != nil {
 		return f, err
 	}
 	if expiry != nil {
 		f.ExpiryDate = *expiry
 	}
+	if productCode != nil {
+		f.ProductCode = *productCode
+	}
+	if spec != nil {
+		f.Spec = *spec
+	}
+	if sizeSpec != nil {
+		f.SizeSpec = *sizeSpec
+	}
 	return f, nil
+}
+
+// gs1FieldValueMap builds the field->text lookup that
+// RenderTiledGS1PDF/InjectGS1ObjectsIntoSVG use to resolve each positioned
+// TextObjectConfig, keyed by the same field names the templates editor uses.
+func gs1FieldValueMap(f gs1ExportFields) map[string]string {
+	m := map[string]string{
+		"gtin":         f.GTIN,
+		"lot":          f.Lot,
+		"serial":       f.Serial,
+		"product_code": f.ProductCode,
+		"spec":         f.Spec,
+		"size_spec":    f.SizeSpec,
+	}
+	if !f.ManufactureDate.IsZero() {
+		m["manufacture_date"] = f.ManufactureDate.Format("2/1/2006")
+	}
+	if !f.ExpiryDate.IsZero() {
+		m["expiry_date"] = f.ExpiryDate.Format("2/1/2006")
+	}
+	return m
 }
 
 // createGS1Units generates `quantity` brand-new physical-sticker rows for a
@@ -205,7 +247,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 			tpl.FilePath, tpl.FileType,
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
-			tpl.GS1Layout, fields.Serial, barcodePNG,
+			tpl.GS1Layout, gs1FieldValueMap(fields), barcodePNG,
 			tokens, imageFn,
 		)
 	} else {
@@ -313,7 +355,7 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		var out []byte
 		if tpl.IsGS1 {
 			out, err = services.InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG,
-				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, fields.Serial, tpl.WidthMM, tpl.HeightMM)
+				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, gs1FieldValueMap(fields), tpl.WidthMM, tpl.HeightMM)
 		} else {
 			out, err = services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
 		}
