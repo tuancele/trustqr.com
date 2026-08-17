@@ -11,10 +11,10 @@ const nunito = Nunito({
 export const metadata: Metadata = {
   metadataBase: new URL('https://trustqr.com'),
   title: {
-    default: 'TrustQR - Hệ thống xác thực chống giả chuyên nghiệp',
+    default: 'TrustQR - Professional Anti-Counterfeit Verification System',
     template: '%s - TrustQR',
   },
-  description: 'Dịch vụ QR chuyên nghiệp: chống hàng giả, truy vết phân phối, quản lý voucher và bảo vệ thương hiệu.',
+  description: 'Professional QR service: anti-counterfeiting, distribution traceability, voucher management, and brand protection.',
 };
 
 export const viewport: Viewport = {

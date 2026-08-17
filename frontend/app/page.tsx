@@ -14,22 +14,22 @@ export default function Home() {
           <h1 className="text-3xl sm:text-4xl font-bold text-gov-700 mb-2">
             TrustQR
           </h1>
-          <p className="text-lg text-gray-700">Nền tảng xác thực chống hàng giả chuyên nghiệp</p>
-          <p className="text-sm text-gray-500 mt-1">Chống hàng giả · Truy vết phân phối · Bảo vệ thương hiệu</p>
+          <p className="text-lg text-gray-700">Professional Anti-Counterfeit Verification Platform</p>
+          <p className="text-sm text-gray-500 mt-1">Anti-Counterfeiting · Distribution Traceability · Brand Protection</p>
         </div>
 
         <div className="card p-6 sm:p-8 mb-6">
-          <h2 className="font-bold text-gray-900 text-lg mb-6 text-center">Hướng dẫn xác thực sản phẩm</h2>
+          <h2 className="font-bold text-gray-900 text-lg mb-6 text-center">How to Verify Your Product</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Step number={1} icon={Shield} title="Cào lớp bạc">
-              Cạo lớp bạc phủ trên tem sản phẩm để lộ mã QR bên trong
+            <Step number={1} icon={Shield} title="Scratch the coating">
+              Scratch off the silver coating on the label to reveal the QR code underneath
             </Step>
-            <Step number={2} icon={ScanLine} title="Quét mã QR">
-              Dùng camera điện thoại quét mã QR vừa hiện ra
+            <Step number={2} icon={ScanLine} title="Scan the QR code">
+              Use your phone's camera to scan the revealed QR code
             </Step>
-            <Step number={3} icon={Ticket} title="Nhận voucher">
-              Nhập SĐT để nhận voucher độc quyền chỉ dành cho khách chính hãng
+            <Step number={3} icon={Ticket} title="Get your voucher">
+              Enter your phone number to receive an exclusive voucher for genuine customers
             </Step>
           </div>
         </div>
@@ -38,24 +38,24 @@ export default function Home() {
           <div className="flex gap-3">
             <ShieldCheck className="w-5 h-5 text-amber-700 flex-shrink-0" />
             <div className="text-sm text-amber-800">
-              <p className="font-semibold mb-1">Lưu ý bảo vệ bản thân</p>
+              <p className="font-semibold mb-1">How to protect yourself</p>
               <ul className="list-disc pl-5 space-y-0.5">
-                <li>Chỉ mua sản phẩm tại các đại lý được ủy quyền</li>
-                <li>Không tin mã QR bị dán chồng, chỉnh sửa, hoặc không có lớp bạc</li>
-                <li>Nếu quét ra "CẢNH BÁO đã quét X lần" → có thể là hàng nhái sao chép tem</li>
+                <li>Only buy from authorized distributors</li>
+                <li>Don't trust a QR code that looks re-stuck, altered, or has no scratch coating</li>
+                <li>A "WARNING: scanned X times" result may indicate a copied/counterfeit label</li>
               </ul>
             </div>
           </div>
         </div>
 
         <div className="text-center mt-8 text-xs text-gray-500 space-y-1">
-          <p>© TrustQR — Nền tảng chống hàng giả chuyên nghiệp</p>
+          <p>© TrustQR — Professional Anti-Counterfeit Platform</p>
           <p>
-            <Link href="/privacy" className="text-gov-600 hover:underline">Chính sách bảo mật</Link>
+            <Link href="/privacy" className="text-gov-600 hover:underline">Privacy Policy</Link>
             {' · '}
-            <Link href="/customer/unsubscribe" className="text-gov-600 hover:underline">Ngừng nhận thông báo</Link>
+            <Link href="/customer/unsubscribe" className="text-gov-600 hover:underline">Unsubscribe</Link>
             {' · '}
-            <Link href="/customer/deletion" className="text-gov-600 hover:underline">Xóa dữ liệu (NĐ13)</Link>
+            <Link href="/customer/deletion" className="text-gov-600 hover:underline">Delete My Data</Link>
           </p>
         </div>
       </div>
