@@ -69,33 +69,41 @@ func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 
 // -------- Create a new manually-entered label --------
 
+// validateGS1LabelReq parses and checksum-validates the GS1 fields shared by
+// create and update, so a label can never be saved in a state that couldn't
+// render as a valid GS1 DataMatrix.
+func validateGS1LabelReq(req gs1LabelReq) (mfg time.Time, exp time.Time, status int, errResp fiber.Map) {
+	var err error
+	mfg, err = time.Parse("2006-01-02", req.ManufactureDate)
+	if err != nil {
+		return mfg, exp, 400, fiber.Map{"error": "manufacture_date_invalid"}
+	}
+	if req.ExpiryDate != "" {
+		exp, err = time.Parse("2006-01-02", req.ExpiryDate)
+		if err != nil {
+			return mfg, exp, 400, fiber.Map{"error": "expiry_date_invalid"}
+		}
+	}
+	if req.Lot == "" || req.Serial == "" {
+		return mfg, exp, 400, fiber.Map{"error": "lot_and_serial_required"}
+	}
+	if _, err := services.BuildGS1ElementString(services.GS1Fields{
+		GTIN: req.GTIN, ManufactureDate: mfg, ExpiryDate: exp, Lot: req.Lot, Serial: req.Serial,
+	}); err != nil {
+		return mfg, exp, 422, fiber.Map{"error": err.Error()}
+	}
+	return mfg, exp, 0, nil
+}
+
 func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 	var req gs1LabelReq
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
 	}
 
-	mfg, err := time.Parse("2006-01-02", req.ManufactureDate)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "manufacture_date_invalid"})
-	}
-	var exp time.Time
-	if req.ExpiryDate != "" {
-		exp, err = time.Parse("2006-01-02", req.ExpiryDate)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "expiry_date_invalid"})
-		}
-	}
-	if req.Lot == "" || req.Serial == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "lot_and_serial_required"})
-	}
-
-	// Validates GTIN format/checksum-eligible length up front so the row
-	// isn't saved if it could never render as a valid GS1 DataMatrix.
-	if _, err := services.BuildGS1ElementString(services.GS1Fields{
-		GTIN: req.GTIN, ManufactureDate: mfg, ExpiryDate: exp, Lot: req.Lot, Serial: req.Serial,
-	}); err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
+	mfg, _, status, errResp := validateGS1LabelReq(req)
+	if errResp != nil {
+		return c.Status(status).JSON(errResp)
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
@@ -110,6 +118,45 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 
 	r, err := scanGS1LabelRow(row)
 	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	return c.JSON(r)
+}
+
+// -------- Update an existing label's fields --------
+
+func (h *GS1LabelHandler) UpdateLabel(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	var req gs1LabelReq
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
+	}
+
+	mfg, _, status, errResp := validateGS1LabelReq(req)
+	if errResp != nil {
+		return c.Status(status).JSON(errResp)
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	row := h.DB.QueryRow(ctx, `
+		UPDATE gs1_labels SET
+			gtin = $1, manufacture_date = $2, expiry_date = NULLIF($3,'')::DATE, lot = $4, serial = $5,
+			product_name = NULLIF($6,''), product_code = NULLIF($7,''), spec = NULLIF($8,''),
+			unit = NULLIF($9,''), manufacturer = NULLIF($10,''), origin_country = NULLIF($11,''), brand_id = $12
+		WHERE id = $13
+		RETURNING `+gs1LabelColumns, req.GTIN, mfg, req.ExpiryDate, req.Lot, req.Serial,
+		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry, req.BrandID, id)
+
+	r, err := scanGS1LabelRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 	return c.JSON(r)

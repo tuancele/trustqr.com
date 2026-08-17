@@ -221,6 +221,7 @@ func main() {
 	protected.Post("/gs1/labels", gs1Label.CreateLabel)
 	protected.Get("/gs1/labels", gs1Label.ListLabels)
 	protected.Get("/gs1/labels/:id", gs1Label.GetLabel)
+	protected.Put("/gs1/labels/:id", gs1Label.UpdateLabel)
 	protected.Get("/gs1/labels/:id/units", gs1Label.ListUnits)
 	protected.Get("/gs1/units/:id/qr.png", gs1Label.GetUnitQRImage)
 	protected.Delete("/gs1/labels/:id", gs1Label.DeleteLabel)

@@ -5,11 +5,12 @@ import Link from 'next/link';
 import {
   ScanBarcode, ArrowLeft, Layers, Printer, Loader2, AlertTriangle,
   FileImage, FileArchive, Settings2, ExternalLink, XCircle,
-  ListChecks, ChevronLeft, ChevronRight, CheckCircle2,
+  ListChecks, ChevronLeft, ChevronRight, CheckCircle2, Pencil, Save, X,
 } from 'lucide-react';
 import { api, download, downloadPost } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert, EmptyState } from '@/components/ui';
 import { fmtDateShort, fmtDate, fmtNumber } from '@/lib/utils';
+import { BrandPicker, type Brand } from '@/components/BrandPicker';
 
 interface GS1LabelDetail {
   id: number;
@@ -41,6 +42,10 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   template_not_vector: 'Mẫu tem này không phải SVG — hãy dùng nút Tải PDF.',
   quantity_too_large: 'Số lượng bản in vượt quá giới hạn cho phép.',
   qr_px_out_of_range: 'Độ phân giải QR không hợp lệ.',
+  gtin_must_be_8_to_14_digits: 'GTIN phải là số, từ 8 đến 14 chữ số.',
+  manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
+  expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
+  lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
 };
 
 function errMsg(err?: string): string {
@@ -55,13 +60,17 @@ export default function GS1LabelDetailPage({ params }: { params: { id: string } 
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'units' | 'print'>('overview');
 
-  useEffect(() => {
-    setLoading(true);
-    api<GS1LabelDetail>(`/api/v1/admin/gs1/labels/${id}`).then((r) => {
+  function reload() {
+    return api<GS1LabelDetail>(`/api/v1/admin/gs1/labels/${id}`).then((r) => {
       if (r.ok && r.data) setData(r.data);
       else setError(r.error || 'not_found');
-      setLoading(false);
+      return r;
     });
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    reload().finally(() => setLoading(false));
   }, [id]);
 
   if (loading) return <Spinner />;
@@ -92,7 +101,7 @@ export default function GS1LabelDetailPage({ params }: { params: { id: string } 
         </div>
       </div>
 
-      {tab === 'overview' && <OverviewTab data={data} imgSrc={imgSrc} />}
+      {tab === 'overview' && <OverviewTab data={data} imgSrc={imgSrc} onSaved={reload} />}
       {tab === 'units' && <UnitsTab labelId={id} />}
       {tab === 'print' && <PrintTab labelId={id} />}
     </div>
@@ -111,7 +120,13 @@ function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; on
 }
 
 // ============ Overview Tab ============
-function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string }) {
+function OverviewTab({ data, imgSrc, onSaved }: { data: GS1LabelDetail; imgSrc: string; onSaved: () => Promise<any> }) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return <EditForm data={data} onCancel={() => setEditing(false)} onSaved={async () => { await onSaved(); setEditing(false); }} />;
+  }
+
   return (
     <div className="max-w-lg space-y-5">
       <div className="card p-5 space-y-4">
@@ -151,14 +166,133 @@ function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string })
             />
           </tbody>
         </table>
-        <a
-          href={imgSrc}
-          download={`gs1_${data.lot}_${data.serial}.png`}
-          className="btn-primary w-full justify-center text-sm"
-        >
-          Tải PNG DataMatrix
-        </a>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setEditing(true)} className="btn-secondary flex-1 justify-center text-sm">
+            <Pencil className="w-3.5 h-3.5" /> Sửa thông tin
+          </button>
+          <a
+            href={imgSrc}
+            download={`gs1_${data.lot}_${data.serial}.png`}
+            className="btn-primary flex-1 justify-center text-sm"
+          >
+            Tải PNG DataMatrix
+          </a>
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ============ Edit form (reuses the same fields as create) ============
+const editableKeys = [
+  'gtin', 'manufacture_date', 'expiry_date', 'lot', 'serial',
+  'product_name', 'product_code', 'spec', 'unit', 'manufacturer', 'origin_country',
+] as const;
+type EditFormState = Record<(typeof editableKeys)[number], string>;
+
+function EditForm({ data, onCancel, onSaved }: { data: GS1LabelDetail; onCancel: () => void; onSaved: () => Promise<void> }) {
+  const [form, setForm] = useState<EditFormState>(() => {
+    const f = {} as EditFormState;
+    for (const k of editableKeys) f[k] = (data[k as keyof GS1LabelDetail] as string) || '';
+    f.manufacture_date = f.manufacture_date.slice(0, 10);
+    f.expiry_date = f.expiry_date.slice(0, 10);
+    return f;
+  });
+  const [brand, setBrand] = useState<Brand | null>(
+    data.brand_id ? { id: data.brand_id, name: data.brand_name || '', website: data.brand_website || null, has_logo: !!data.brand_logo_url, is_active: true } : null
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function set<K extends keyof EditFormState>(key: K, value: string) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!form.gtin || !form.manufacture_date || !form.lot || !form.serial) {
+      setError('Cần nhập GTIN, ngày sản xuất, lô và serial.');
+      return;
+    }
+    setBusy(true);
+    const r = await api(`/api/v1/admin/gs1/labels/${data.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...form, brand_id: brand?.id ?? null }),
+    });
+    setBusy(false);
+    if (!r.ok) { setError(errMsg(r.error)); return; }
+    await onSaved();
+  }
+
+  return (
+    <form onSubmit={submit} className="max-w-2xl card p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <Pencil className="w-4 h-4 text-gov-600" />
+        <h3 className="font-semibold text-gray-900 text-sm">Sửa thông tin mã GS1</h3>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <EField label="GTIN (AI 01)" required>
+          <input value={form.gtin} onChange={(e) => set('gtin', e.target.value)} className="form-input font-mono" />
+        </EField>
+        <EField label="Ngày sản xuất (AI 11)" required>
+          <input type="date" value={form.manufacture_date} onChange={(e) => set('manufacture_date', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Hạn sử dụng (AI 17)">
+          <input type="date" value={form.expiry_date} onChange={(e) => set('expiry_date', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Lot / Batch number (AI 10)" required>
+          <input value={form.lot} onChange={(e) => set('lot', e.target.value)} className="form-input font-mono" />
+        </EField>
+        <EField label="Serial number (AI 21)" required>
+          <input value={form.serial} onChange={(e) => set('serial', e.target.value)} className="form-input font-mono" />
+        </EField>
+        <EField label="Tên sản phẩm">
+          <input value={form.product_name} onChange={(e) => set('product_name', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Mã sản phẩm">
+          <input value={form.product_code} onChange={(e) => set('product_code', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Quy cách">
+          <input value={form.spec} onChange={(e) => set('spec', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Đơn vị">
+          <input value={form.unit} onChange={(e) => set('unit', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Hãng sản xuất">
+          <input value={form.manufacturer} onChange={(e) => set('manufacturer', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Xuất xứ">
+          <input value={form.origin_country} onChange={(e) => set('origin_country', e.target.value)} className="form-input" />
+        </EField>
+        <EField label="Thương hiệu">
+          <BrandPicker value={brand} onChange={setBrand} />
+        </EField>
+      </div>
+
+      {error && <Alert kind="danger" icon={AlertTriangle}>{error}</Alert>}
+
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="btn-primary text-sm">
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Lưu thay đổi
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy} className="btn-secondary text-sm">
+          <X className="w-4 h-4" /> Hủy
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function EField({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="form-label">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      {children}
     </div>
   );
 }
