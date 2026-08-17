@@ -133,6 +133,7 @@ func main() {
 	labelLayoutPresets := &handlers.LabelLayoutPresetHandler{DB: pool, Audit: audit}
 	orders := &handlers.OrderHandler{DB: pool, Tokens: tokenSvc, Audit: audit}
 	settings := &handlers.SettingsHandler{DB: pool}
+	vouchers := &handlers.VoucherHandler{DB: pool}
 
 	api := app.Group("/api/v1")
 
@@ -328,6 +329,9 @@ func main() {
 	// Global system settings (scan-limit locking for QR / GS1 codes)
 	protected.Get("/settings/scan-limits", settings.GetScanLimits)
 	protected.Put("/settings/scan-limits", settings.UpdateScanLimits)
+
+	// Voucher lookup — cross-check codes customers present against QR/GS1 issuance
+	protected.Get("/vouchers", vouchers.List)
 
 	addr := ":" + strings.TrimPrefix(cfg.AppPort, ":")
 	fmt.Printf("🚀 TrustQR API listening on %s (env=%s)\n", addr, cfg.AppEnv)
