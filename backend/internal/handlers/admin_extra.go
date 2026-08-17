@@ -112,7 +112,7 @@ func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT t.id, t.secret_code, t.scan_count, t.status,
+		SELECT 'qr' AS source, t.id, t.secret_code, t.scan_count, t.status,
 		       t.first_scanned_at, t.first_scan_city,
 		       COUNT(DISTINCT s.ip_address) FILTER (WHERE s.scanned_at > NOW() - INTERVAL '30 days') AS unique_ips,
 		       COUNT(DISTINCT s.city)       FILTER (WHERE s.scanned_at > NOW() - INTERVAL '30 days') AS unique_cities,
@@ -122,7 +122,18 @@ func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 		LEFT JOIN scan_logs s ON s.token_id = t.id
 		WHERE t.scan_count > 3 OR t.status IN ('flagged','disabled')
 		GROUP BY t.id, b.batch_code, b.product_name
-		ORDER BY t.scan_count DESC
+		UNION ALL
+		SELECT 'gs1' AS source, u.id, u.verify_code, u.scan_count, u.status,
+		       u.first_scanned_at, u.first_scan_city,
+		       COUNT(DISTINCT g.ip_address) FILTER (WHERE g.scanned_at > NOW() - INTERVAL '30 days') AS unique_ips,
+		       COUNT(DISTINCT g.city)       FILTER (WHERE g.scanned_at > NOW() - INTERVAL '30 days') AS unique_cities,
+		       gl.lot, COALESCE(gl.product_name,'')
+		FROM gs1_label_units u
+		JOIN gs1_labels gl ON gl.id = u.label_id
+		LEFT JOIN gs1_unit_scan_logs g ON g.unit_id = u.id
+		WHERE u.scan_count > 3 OR u.status IN ('flagged','disabled')
+		GROUP BY u.id, gl.lot, gl.product_name
+		ORDER BY scan_count DESC
 		LIMIT 200
 	`)
 	if err != nil {
@@ -131,6 +142,7 @@ func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 	defer rows.Close()
 
 	type row struct {
+		Source         string     `json:"source"`
 		ID             int64      `json:"id"`
 		SecretCode     string     `json:"secret_code"`
 		ScanCount      int        `json:"scan_count"`
@@ -145,7 +157,7 @@ func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 	out := []row{}
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.ID, &r.SecretCode, &r.ScanCount, &r.Status,
+		if err := rows.Scan(&r.Source, &r.ID, &r.SecretCode, &r.ScanCount, &r.Status,
 			&r.FirstScannedAt, &r.FirstScanCity, &r.UniqueIPs, &r.UniqueCities,
 			&r.BatchCode, &r.ProductName); err == nil {
 			out = append(out, r)
@@ -167,9 +179,18 @@ func (h *AdminExtraHandler) GeoAnalytics(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT COALESCE(city,'Unknown') AS city, COUNT(*) AS scans, COUNT(DISTINCT token_id) AS unique_tokens
-		FROM scan_logs
-		WHERE scanned_at > NOW() - make_interval(days => $1)
+		SELECT city, SUM(scans) AS scans, SUM(unique_tokens) AS unique_tokens
+		FROM (
+			SELECT COALESCE(city,'Unknown') AS city, COUNT(*) AS scans, COUNT(DISTINCT token_id) AS unique_tokens
+			FROM scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1)
+			GROUP BY city
+			UNION ALL
+			SELECT COALESCE(city,'Unknown') AS city, COUNT(*) AS scans, COUNT(DISTINCT unit_id) AS unique_tokens
+			FROM gs1_unit_scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1)
+			GROUP BY city
+		) x
 		GROUP BY city
 		ORDER BY scans DESC
 		LIMIT 100
@@ -207,12 +228,22 @@ func (h *AdminExtraHandler) ScanTrend(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT DATE(scanned_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
-		       COUNT(*) AS scans, COUNT(DISTINCT token_id) AS unique_tokens
-		FROM scan_logs
-		WHERE scanned_at > NOW() - make_interval(days => $1)
-		GROUP BY 1
-		ORDER BY 1 ASC
+		SELECT day, SUM(scans) AS scans, SUM(unique_tokens) AS unique_tokens
+		FROM (
+			SELECT DATE(scanned_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
+			       COUNT(*) AS scans, COUNT(DISTINCT token_id) AS unique_tokens
+			FROM scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1)
+			GROUP BY 1
+			UNION ALL
+			SELECT DATE(scanned_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
+			       COUNT(*) AS scans, COUNT(DISTINCT unit_id) AS unique_tokens
+			FROM gs1_unit_scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1)
+			GROUP BY 1
+		) x
+		GROUP BY day
+		ORDER BY day ASC
 	`, days)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "query"})
@@ -249,20 +280,39 @@ func (h *AdminExtraHandler) DeviceBreakdown(c *fiber.Ctx) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT 'device' AS kind, COALESCE(device_type,'Không xác định') AS label, COUNT(*) AS count
-		FROM scan_logs
-		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
-		GROUP BY 2
-		UNION ALL
-		SELECT 'os', COALESCE(os_name,'Không xác định'), COUNT(*)
-		FROM scan_logs
-		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
-		GROUP BY 2
-		UNION ALL
-		SELECT 'browser', COALESCE(browser_name,'Không xác định'), COUNT(*)
-		FROM scan_logs
-		WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
-		GROUP BY 2
+		SELECT kind, label, SUM(count) AS count
+		FROM (
+			SELECT 'device' AS kind, COALESCE(device_type,'Không xác định') AS label, COUNT(*) AS count
+			FROM scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+			UNION ALL
+			SELECT 'os', COALESCE(os_name,'Không xác định'), COUNT(*)
+			FROM scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+			UNION ALL
+			SELECT 'browser', COALESCE(browser_name,'Không xác định'), COUNT(*)
+			FROM scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+			UNION ALL
+			SELECT 'device', COALESCE(device_type,'Không xác định'), COUNT(*)
+			FROM gs1_unit_scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+			UNION ALL
+			SELECT 'os', COALESCE(os_name,'Không xác định'), COUNT(*)
+			FROM gs1_unit_scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+			UNION ALL
+			SELECT 'browser', COALESCE(browser_name,'Không xác định'), COUNT(*)
+			FROM gs1_unit_scan_logs
+			WHERE scanned_at > NOW() - make_interval(days => $1) AND (device_type IS NULL OR device_type <> 'bot')
+			GROUP BY 2
+		) x
+		GROUP BY kind, label
 		ORDER BY 1, 3 DESC
 	`, days)
 	if err != nil {
@@ -317,36 +367,46 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
 
-	where := ` WHERE sl.scanned_at > NOW() - make_interval(days => $1)`
+	base := `
+		SELECT sl.id, sl.scanned_at, sl.is_repeat, 'qr'::text AS source,
+		       t.secret_code AS code, b.batch_code AS batch_code, COALESCE(b.product_name,'') AS product_name,
+		       COALESCE(sl.city,'') AS city, COALESCE(sl.region,'') AS region, COALESCE(sl.country,'') AS country,
+		       COALESCE(sl.device_type,'') AS device_type, COALESCE(sl.os_name,'') AS os_name, COALESCE(sl.os_version,'') AS os_version,
+		       COALESCE(sl.browser_name,'') AS browser_name, COALESCE(sl.browser_version,'') AS browser_version,
+		       COALESCE(sl.ip_address::text,'') AS ip, sl.device_lat AS lat, sl.device_lng AS lng,
+		       COALESCE(sl.visitor_id,'') AS visitor_id
+		FROM scan_logs sl
+		JOIN qr_tokens t ON t.id = sl.token_id
+		JOIN batches b ON b.id = t.batch_id
+		WHERE sl.scanned_at > NOW() - make_interval(days => $1)
+		UNION ALL
+		SELECT g.id, g.scanned_at, g.is_repeat, 'gs1'::text AS source,
+		       u.verify_code AS code, gl.lot AS batch_code, COALESCE(gl.product_name,'') AS product_name,
+		       COALESCE(g.city,'') AS city, COALESCE(g.region,'') AS region, COALESCE(g.country,'') AS country,
+		       COALESCE(g.device_type,'') AS device_type, COALESCE(g.os_name,'') AS os_name, COALESCE(g.os_version,'') AS os_version,
+		       COALESCE(g.browser_name,'') AS browser_name, COALESCE(g.browser_version,'') AS browser_version,
+		       COALESCE(g.ip_address::text,'') AS ip, NULL::double precision AS lat, NULL::double precision AS lng,
+		       '' AS visitor_id
+		FROM gs1_unit_scan_logs g
+		JOIN gs1_label_units u ON u.id = g.unit_id
+		JOIN gs1_labels gl ON gl.id = u.label_id
+		WHERE g.scanned_at > NOW() - make_interval(days => $1)
+	`
+	where := ""
 	args := []any{days}
 	if q != "" {
 		args = append(args, "%"+q+"%")
-		where += fmt.Sprintf(` AND (t.secret_code ILIKE $%d OR b.product_name ILIKE $%d OR b.batch_code ILIKE $%d)`, len(args), len(args), len(args))
+		where = fmt.Sprintf(` WHERE (code ILIKE $%d OR product_name ILIKE $%d OR batch_code ILIKE $%d)`, len(args), len(args), len(args))
 	}
 
 	var total int
-	if err := h.DB.QueryRow(ctx, `
-		SELECT COUNT(*) FROM scan_logs sl
-		JOIN qr_tokens t ON t.id = sl.token_id
-		JOIN batches b ON b.id = t.batch_id
-	`+where, args...).Scan(&total); err != nil {
+	if err := h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM (`+base+`) combined`+where, args...).Scan(&total); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "count"})
 	}
 
 	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := h.DB.Query(ctx, `
-		SELECT sl.id, sl.scanned_at, sl.is_repeat,
-		       t.secret_code, b.batch_code, COALESCE(b.product_name,''),
-		       COALESCE(sl.city,''), COALESCE(sl.region,''), COALESCE(sl.country,''),
-		       COALESCE(sl.device_type,''), COALESCE(sl.os_name,''), COALESCE(sl.os_version,''),
-		       COALESCE(sl.browser_name,''), COALESCE(sl.browser_version,''),
-		       COALESCE(sl.ip_address::text,''), sl.device_lat, sl.device_lng,
-		       COALESCE(sl.visitor_id,'')
-		FROM scan_logs sl
-		JOIN qr_tokens t ON t.id = sl.token_id
-		JOIN batches b ON b.id = t.batch_id
-	`+where+fmt.Sprintf(`
-		ORDER BY sl.scanned_at DESC
+	rows, err := h.DB.Query(ctx, `SELECT * FROM (`+base+`) combined`+where+fmt.Sprintf(`
+		ORDER BY scanned_at DESC
 		LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "query"})
@@ -357,6 +417,7 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 		ID             int64     `json:"id"`
 		ScannedAt      time.Time `json:"scanned_at"`
 		IsRepeat       bool      `json:"is_repeat"`
+		Source         string    `json:"source"`
 		SecretCode     string    `json:"secret_code"`
 		BatchCode      string    `json:"batch_code"`
 		ProductName    string    `json:"product_name"`
@@ -376,7 +437,7 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 	out := []row{}
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.ID, &r.ScannedAt, &r.IsRepeat, &r.SecretCode, &r.BatchCode, &r.ProductName,
+		if err := rows.Scan(&r.ID, &r.ScannedAt, &r.IsRepeat, &r.Source, &r.SecretCode, &r.BatchCode, &r.ProductName,
 			&r.City, &r.Region, &r.Country, &r.DeviceType, &r.OSName, &r.OSVersion,
 			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID); err != nil {
 			log.Printf("scan-log row scan: %v", err)

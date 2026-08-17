@@ -6,14 +6,18 @@ import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2 } from 'lucide-react';
 import { api, fetchBlobUrl } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert } from '@/components/ui';
 
+type TextWeight = 'regular' | 'bold' | 'extrabold';
+type DateFormat = '' | 'yymmdd' | 'iso';
+
 interface TextObjectAPI {
   id: string;
   field: string;
   x_ratio: number;
   y_ratio: number;
   size_ratio: number;
-  bold: boolean;
+  weight: TextWeight;
   rotate_180: boolean;
+  date_format?: DateFormat;
 }
 
 interface Template {
@@ -41,8 +45,23 @@ interface TextObjState {
   x: number;
   y: number;
   size: number;
-  bold: boolean;
+  weight: TextWeight;
   rotate180: boolean;
+  dateFormat: DateFormat;
+}
+
+const DATE_FIELDS = new Set(['manufacture_date', 'expiry_date']);
+
+const DATE_DEMO = {
+  manufacture_date: { yymmdd: '260817', iso: '2026-08-17' },
+  expiry_date: { yymmdd: '310817', iso: '2031-08-17' },
+} as const;
+
+function demoValueFor(field: string, dateFormat: DateFormat): string {
+  if (field === 'manufacture_date' || field === 'expiry_date') {
+    return DATE_DEMO[field][dateFormat === 'iso' ? 'iso' : 'yymmdd'];
+  }
+  return DEMO_VALUES[field] || field;
 }
 
 type DragTarget = 'qr' | 'barcode' | string;
@@ -118,7 +137,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
         setTextObjects(
           (t.text_objects || []).map((o) => ({
             id: o.id, field: o.field, x: o.x_ratio, y: o.y_ratio, size: o.size_ratio,
-            bold: o.bold, rotate180: o.rotate_180,
+            weight: o.weight || 'regular', rotate180: o.rotate_180, dateFormat: o.date_format || '',
           }))
         );
       } else {
@@ -152,7 +171,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
       {
         id: newObjectId(), field: newFieldPick,
         x: 0.1, y: clamp(0.1 + count * 0.06, 0, 0.9), size: 0.045,
-        bold: false, rotate180: false,
+        weight: 'regular', rotate180: false, dateFormat: '',
       },
     ]);
   }
@@ -229,7 +248,8 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
       body.barcode_h_ratio = barcode.h;
       body.text_objects = textObjects.map((t) => ({
         id: t.id, field: t.field, x_ratio: t.x, y_ratio: t.y, size_ratio: t.size,
-        bold: t.bold, rotate_180: t.rotate180,
+        weight: t.weight, rotate_180: t.rotate180,
+        date_format: DATE_FIELDS.has(t.field) ? (t.dateFormat || 'yymmdd') : undefined,
       }));
     }
     const r = await api(`/api/v1/admin/templates/${tpl.id}`, {
@@ -332,7 +352,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
                   <TextBox
                     key={t.id}
                     label={FIELD_LABELS[t.field] || t.field}
-                    value={DEMO_VALUES[t.field] || t.field}
+                    value={demoValueFor(t.field, t.dateFormat)}
                     state={t}
                     colorKey={TEXT_COLOR_KEYS[i % TEXT_COLOR_KEYS.length]}
                     containerWidthPx={containerWidthPx}
@@ -407,16 +427,35 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Kiểu chữ (Arial)</label>
                       <div className="flex gap-1.5">
-                        <button type="button" onClick={() => updateTextObject(t.id, { bold: false })}
-                          className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${!t.bold ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                        <button type="button" onClick={() => updateTextObject(t.id, { weight: 'regular' })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${t.weight === 'regular' ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
                           Regular
                         </button>
-                        <button type="button" onClick={() => updateTextObject(t.id, { bold: true })}
-                          className={`flex-1 px-2 py-1 rounded text-xs font-bold border ${t.bold ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                        <button type="button" onClick={() => updateTextObject(t.id, { weight: 'bold' })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-bold border ${t.weight === 'bold' ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
                           Bold
+                        </button>
+                        <button type="button" onClick={() => updateTextObject(t.id, { weight: 'extrabold' })}
+                          className={`flex-1 px-2 py-1 rounded text-xs font-extrabold border ${t.weight === 'extrabold' ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                          Extra Bold
                         </button>
                       </div>
                     </div>
+                    {DATE_FIELDS.has(t.field) && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Định dạng ngày</label>
+                        <div className="flex gap-1.5">
+                          <button type="button" onClick={() => updateTextObject(t.id, { dateFormat: 'yymmdd' })}
+                            className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${t.dateFormat !== 'iso' ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                            YYMMDD ({DATE_DEMO[t.field as 'manufacture_date' | 'expiry_date'].yymmdd})
+                          </button>
+                          <button type="button" onClick={() => updateTextObject(t.id, { dateFormat: 'iso' })}
+                            className={`flex-1 px-2 py-1 rounded text-xs font-medium border ${t.dateFormat === 'iso' ? 'bg-gov-500 text-white border-gov-500' : 'bg-white text-gray-700 border-gray-200'}`}>
+                            YYYY-MM-DD ({DATE_DEMO[t.field as 'manufacture_date' | 'expiry_date'].iso})
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Hướng chữ</label>
                       <div className="flex gap-1.5">
@@ -483,7 +522,7 @@ function TextBox({
           fontSize: `${fontSizePx}px`,
           lineHeight: 1.1,
           fontFamily: 'Arial, Helvetica, sans-serif',
-          fontWeight: state.bold ? 700 : 400,
+          fontWeight: { regular: 400, bold: 700, extrabold: 900 }[state.weight],
           transform: state.rotate180 ? 'rotate(180deg)' : undefined,
         }}
       >

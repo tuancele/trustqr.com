@@ -16,17 +16,25 @@ type TrendPoint = { day: string; scans: number; unique_tokens: number };
 type BreakdownItem = { label: string; count: number };
 type GeoRow = { city: string; scans: number; unique_tokens: number };
 type FraudRow = {
-  id: number; secret_code: string; scan_count: number; status: string;
+  source: 'qr' | 'gs1'; id: number; secret_code: string; scan_count: number; status: string;
   unique_ips: number; unique_cities: number; batch_code: string; product_name: string;
 };
 type ScanLogRow = {
-  id: number; scanned_at: string; is_repeat: boolean;
+  id: number; scanned_at: string; is_repeat: boolean; source: 'qr' | 'gs1';
   secret_code: string; batch_code: string; product_name: string;
   city: string; region: string; country: string;
   device_type: string; os_name: string; os_version: string;
   browser_name: string; browser_version: string;
   ip: string; lat: number | null; lng: number | null; visitor_id: string;
 };
+
+function SourceBadge({ source }: { source: 'qr' | 'gs1' }) {
+  return source === 'gs1' ? (
+    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">GS1</span>
+  ) : (
+    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gov-100 text-gov-700">QR</span>
+  );
+}
 type ScanLogResp = { data: ScanLogRow[]; total: number; page: number; page_size: number };
 
 const DAY_OPTIONS = [7, 30, 90] as const;
@@ -234,6 +242,7 @@ export default function AnalyticsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left text-xs text-gray-600 uppercase tracking-wider">
+                  <th className="px-4 py-3">Nguồn</th>
                   <th className="px-4 py-3">Secret Code</th>
                   <th className="px-4 py-3">Lô</th>
                   <th className="px-4 py-3">Sản phẩm</th>
@@ -245,7 +254,8 @@ export default function AnalyticsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {frauds.map((f) => (
-                  <tr key={f.id} className="hover:bg-gray-50">
+                  <tr key={`${f.source}-${f.id}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-3"><SourceBadge source={f.source} /></td>
                     <td className="px-4 py-3 font-mono text-xs text-gov-700">{f.secret_code}</td>
                     <td className="px-4 py-3 font-mono text-xs">{f.batch_code}</td>
                     <td className="px-4 py-3 text-gray-700">{f.product_name}</td>
@@ -294,6 +304,7 @@ export default function AnalyticsPage() {
                 <thead>
                   <tr className="bg-gray-50 text-xs text-gray-600 uppercase whitespace-nowrap">
                     <th className="px-4 py-2.5">Thời gian</th>
+                    <th className="px-4 py-2.5">Nguồn</th>
                     <th className="px-4 py-2.5">Tem</th>
                     <th className="px-4 py-2.5">Vị trí</th>
                     <th className="px-4 py-2.5">Thiết bị</th>
@@ -303,8 +314,10 @@ export default function AnalyticsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {scanLog.data.map((s) => (
-                    <tr key={s.id} className="hover:bg-gray-50 align-top">
+                    <tr key={`${s.source}-${s.id}`} className="hover:bg-gray-50 align-top">
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(s.scanned_at)}</td>
+
+                      <td className="px-4 py-3"><SourceBadge source={s.source} /></td>
 
                       <td className="px-4 py-3">
                         <div className="font-mono text-xs text-gov-700">{s.secret_code}</div>

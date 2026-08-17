@@ -1,5 +1,6 @@
 import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock } from 'lucide-react';
 import { verifyGS1Code } from '@/lib/api';
+import { CopySecurityCode } from '@/components/CopySecurityCode';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -34,9 +35,20 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
       <div className="max-w-md mx-auto">
         <div className="text-center mb-6">
           {result.brand_logo_url ? (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden">
-              <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
-            </div>
+            result.brand_website ? (
+              <a
+                href={result.brand_website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden"
+              >
+                <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
+              </a>
+            ) : (
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3 overflow-hidden">
+                <img src={result.brand_logo_url} alt={result.brand_name || ''} className="w-full h-full object-contain p-1.5" />
+              </div>
+            )
           ) : (
             <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg ring-4 ring-emerald-100 mb-3">
               <ShieldCheck className="w-9 h-9 text-white" strokeWidth={2} />
@@ -53,6 +65,10 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
             <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-emerald-600'}`}>{result.scan_count}</span> time
             {result.scan_count === 1 ? '' : 's'}.
           </p>
+        </div>
+
+        <div className="mt-4">
+          <CopySecurityCode code={params.code} label="Security Code" copyAriaLabel="Copy security code" />
         </div>
 
         {result.warning && (
@@ -78,6 +94,19 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           {result.spec && <InfoRow icon={Layers} label="Specification" value={result.spec} />}
           {result.unit && <InfoRow icon={Layers} label="Unit" value={result.unit} />}
           {result.manufacturer && <InfoRow icon={Factory} label="Manufacturer" value={result.manufacturer} />}
+          {result.brand_name && (
+            <InfoRow
+              icon={Tag}
+              label="Brand"
+              value={
+                result.brand_website ? (
+                  <a href={result.brand_website} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-emerald-600 hover:underline font-semibold underline-offset-2">
+                    {result.brand_name}
+                  </a>
+                ) : result.brand_name
+              }
+            />
+          )}
           {result.origin_country && <InfoRow icon={MapPin} label="Origin" value={result.origin_country} />}
         </div>
 

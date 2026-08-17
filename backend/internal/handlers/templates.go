@@ -78,8 +78,8 @@ func scanTemplateRow(row pgx.Row) (templateRow, error) {
 // physical label's "chữ ngược" print convention) and one upright/bold.
 func defaultGS1TextObjects() []services.TextObjectConfig {
 	return []services.TextObjectConfig{
-		{ID: "text1", Field: "serial", XRatio: 0.1, YRatio: 0.61, SizeRatio: 0.045, Bold: false, Rotate180: true},
-		{ID: "text2", Field: "serial", XRatio: 0.1, YRatio: 0.90, SizeRatio: 0.045, Bold: true, Rotate180: false},
+		{ID: "text1", Field: "serial", XRatio: 0.1, YRatio: 0.61, SizeRatio: 0.045, Weight: services.WeightRegular, Rotate180: true},
+		{ID: "text2", Field: "serial", XRatio: 0.1, YRatio: 0.90, SizeRatio: 0.045, Weight: services.WeightBold, Rotate180: false},
 	}
 }
 
@@ -88,12 +88,24 @@ var validTextObjectFields = map[string]bool{
 	"expiry_date": true, "product_code": true, "spec": true, "size_spec": true,
 }
 
-// validateTextObjects checks every object's field is a recognized GS1
-// field key and its ratios stay within the same [0,1]/(0,1] bounds as the
-// other position fields on this template.
+var validTextObjectWeights = map[string]bool{
+	"": true, services.WeightRegular: true, services.WeightBold: true, services.WeightExtraBold: true,
+}
+
+var validDateFormats = map[string]bool{"": true, "yymmdd": true, "iso": true}
+
+// validateTextObjects checks every object's field/weight/date_format are
+// recognized values and its ratios stay within the same [0,1]/(0,1] bounds
+// as the other position fields on this template.
 func validateTextObjects(objs []services.TextObjectConfig) bool {
 	for _, o := range objs {
 		if !validTextObjectFields[o.Field] {
+			return false
+		}
+		if !validTextObjectWeights[o.Weight] {
+			return false
+		}
+		if !validDateFormats[o.DateFormat] {
 			return false
 		}
 		if o.XRatio < 0 || o.XRatio > 1 || o.YRatio < 0 || o.YRatio > 1 {

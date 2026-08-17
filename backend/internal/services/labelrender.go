@@ -3,12 +3,14 @@ package services
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-pdf/fpdf"
 )
@@ -129,20 +131,93 @@ func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, l
 	return buf.Bytes(), nil
 }
 
+// Weight values a TextObjectConfig can request. Regular/Bold map to fpdf's
+// two real Helvetica font programs; ExtraBold has no real font program
+// available (fpdf ships no true Extra Bold/Black weight) and is instead
+// faked at draw time.
+const (
+	WeightRegular   = "regular"
+	WeightBold      = "bold"
+	WeightExtraBold = "extrabold"
+)
+
 // TextObjectConfig positions one human-readable text field on a GS1 label
-// template. Field is a key into the fieldValues map passed to
+// template. Field is a key into the GS1FieldValues passed to
 // RenderTiledGS1PDF/InjectGS1ObjectsIntoSVG (gtin, lot, serial,
 // manufacture_date, expiry_date, product_code, spec, size_spec). Multiple
 // TextObjects may share the same Field (e.g. the serial is shown twice on
-// one sticker, styled differently each time).
+// one sticker, styled differently each time). DateFormat only applies to
+// the two date fields ("yymmdd" e.g. 260817, or "iso" e.g. 2026-08-17);
+// it's ignored for every other field.
 type TextObjectConfig struct {
-	ID        string  `json:"id"`
-	Field     string  `json:"field"`
-	XRatio    float64 `json:"x_ratio"`
-	YRatio    float64 `json:"y_ratio"`
-	SizeRatio float64 `json:"size_ratio"`
-	Bold      bool    `json:"bold"`
-	Rotate180 bool    `json:"rotate_180"`
+	ID         string  `json:"id"`
+	Field      string  `json:"field"`
+	XRatio     float64 `json:"x_ratio"`
+	YRatio     float64 `json:"y_ratio"`
+	SizeRatio  float64 `json:"size_ratio"`
+	Weight     string  `json:"weight"`
+	Rotate180  bool    `json:"rotate_180"`
+	DateFormat string  `json:"date_format,omitempty"`
+}
+
+// UnmarshalJSON keeps pre-existing JSONB rows readable after Bold bool was
+// replaced by Weight string: a row with no "weight" key falls back to its
+// old "bold" boolean (true -> bold, false/absent -> regular).
+func (t *TextObjectConfig) UnmarshalJSON(data []byte) error {
+	type alias TextObjectConfig
+	aux := struct {
+		Bold *bool `json:"bold"`
+		*alias
+	}{alias: (*alias)(t)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if t.Weight == "" {
+		if aux.Bold != nil && *aux.Bold {
+			t.Weight = WeightBold
+		} else {
+			t.Weight = WeightRegular
+		}
+	}
+	return nil
+}
+
+// GS1FieldValues supplies the resolved value for every TextObjectConfig
+// on a label. Dates are kept as time.Time rather than pre-formatted
+// strings so each positioned text object can independently choose its own
+// DateFormat (e.g. one manufacture-date object shown as "260817", another
+// as "2026-08-17").
+type GS1FieldValues struct {
+	Fields          map[string]string
+	ManufactureDate time.Time
+	ExpiryDate      time.Time
+}
+
+func (fv GS1FieldValues) resolve(obj TextObjectConfig) string {
+	switch obj.Field {
+	case "manufacture_date":
+		if fv.ManufactureDate.IsZero() {
+			return ""
+		}
+		return formatGS1Date(fv.ManufactureDate, obj.DateFormat)
+	case "expiry_date":
+		if fv.ExpiryDate.IsZero() {
+			return ""
+		}
+		return formatGS1Date(fv.ExpiryDate, obj.DateFormat)
+	default:
+		return fv.Fields[obj.Field]
+	}
+}
+
+// formatGS1Date renders a date per the admin-selected display style.
+// Unset/unrecognized formats default to "yymmdd", the compact form GS1
+// AI 11/17 already encodes on-barcode.
+func formatGS1Date(t time.Time, format string) string {
+	if format == "iso" {
+		return t.Format("2006-01-02")
+	}
+	return t.Format("060102")
 }
 
 // GS1Layout groups the position ratios for the extra objects a GS1 label
@@ -161,10 +236,10 @@ const mmToPt = 2.834645669
 // per-unit QR, the barcode/text are the same for every physical copy in a
 // print run (a GS1 label's fields are defined once, at the label level), so
 // they're registered/drawn once and reused across cells the same way the
-// template image itself is. fieldValues supplies the human-readable string
-// for each TextObjectConfig.Field; objects whose field has no value (empty
-// string or missing key) are skipped.
-func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues map[string]string, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+// template image itself is. fieldValues supplies the resolved value for
+// each TextObjectConfig.Field; objects whose field has no value (empty
+// string or zero date) are skipped.
+func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues GS1FieldValues, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -228,13 +303,13 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 		pdf.ImageOptions("barcode", cellX+barcodeX, cellY+barcodeY, barcodeW, barcodeH, false, barcodeOpts, 0, "")
 
 		for _, obj := range layout.TextObjects {
-			val := fieldValues[obj.Field]
+			val := fieldValues.resolve(obj)
 			if val == "" {
 				continue
 			}
 			sizeMM := obj.SizeRatio * labelW
 			fontStyle := ""
-			if obj.Bold {
+			if obj.Weight == WeightBold || obj.Weight == WeightExtraBold {
 				fontStyle = "B"
 			}
 			pdf.SetFont("Helvetica", fontStyle, sizeMM*mmToPt)
@@ -244,16 +319,7 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 			// way the position editor shows them (top-left origin).
 			tx := cellX + obj.XRatio*labelW
 			ty := cellY + obj.YRatio*labelH + sizeMM
-			if obj.Rotate180 {
-				cx := tx + pdf.GetStringWidth(val)/2
-				cy := ty - sizeMM/2
-				pdf.TransformBegin()
-				pdf.TransformRotate(180, cx, cy)
-				pdf.Text(tx, ty, val)
-				pdf.TransformEnd()
-			} else {
-				pdf.Text(tx, ty, val)
-			}
+			drawGS1Text(pdf, val, tx, ty, sizeMM, obj.Weight, obj.Rotate180)
 		}
 
 		qrPNG, err := imageFn(tok)
@@ -270,6 +336,41 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 		return nil, fmt.Errorf("pdf output: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// gs1ExtraBoldOffsetMM is how far apart each faux-bold pass is drawn — large
+// enough to visibly thicken small print-label text, small enough not to
+// blur/double the glyph at normal viewing size.
+const gs1ExtraBoldOffsetMM = 0.12
+
+// drawGS1Text draws val at baseline (tx,ty), optionally rotated 180 degrees
+// around its own visual center. fpdf's Helvetica only ships Regular and
+// Bold font programs (no true Extra Bold), so WeightExtraBold is faked by
+// redrawing the already-bold glyph a few times at tiny offsets — the
+// standard "poor man's bold" trick for text that has no bolder weight
+// available.
+func drawGS1Text(pdf *fpdf.Fpdf, val string, tx, ty, sizeMM float64, weight string, rotate180 bool) {
+	offsets := [][2]float64{{0, 0}}
+	if weight == WeightExtraBold {
+		offsets = [][2]float64{
+			{0, 0}, {gs1ExtraBoldOffsetMM, 0}, {-gs1ExtraBoldOffsetMM, 0},
+			{0, gs1ExtraBoldOffsetMM}, {0, -gs1ExtraBoldOffsetMM},
+		}
+	}
+	if rotate180 {
+		cx := tx + pdf.GetStringWidth(val)/2
+		cy := ty - sizeMM/2
+		pdf.TransformBegin()
+		pdf.TransformRotate(180, cx, cy)
+		for _, o := range offsets {
+			pdf.Text(tx+o[0], ty+o[1], val)
+		}
+		pdf.TransformEnd()
+		return
+	}
+	for _, o := range offsets {
+		pdf.Text(tx+o[0], ty+o[1], val)
+	}
 }
 
 // InjectQRIntoSVG returns a copy of svgBytes with a base64-embedded QR <image>
@@ -316,9 +417,9 @@ func InjectQRIntoSVG(svgBytes, qrPNG []byte, xRatio, yRatio, sizeRatio, widthMM,
 // elements (per the SVG spec, percentage lengths on properties like
 // font-size resolve against the viewport's normalized diagonal), so it stays
 // consistent with the rest of this file's resolution-independent approach.
-// fieldValues supplies the human-readable string for each
-// TextObjectConfig.Field; objects whose field has no value are skipped.
-func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues map[string]string, widthMM, heightMM float64) ([]byte, error) {
+// fieldValues supplies the resolved value for each TextObjectConfig.Field;
+// objects whose field has no value are skipped.
+func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues GS1FieldValues, widthMM, heightMM float64) ([]byte, error) {
 	const closeTag = "</svg>"
 	idx := bytes.LastIndex(svgBytes, []byte(closeTag))
 	if idx == -1 {
@@ -339,13 +440,16 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 		layout.BarcodeXRatio*100, layout.BarcodeYRatio*100, layout.BarcodeWRatio*100, layout.BarcodeHRatio*100, base64.StdEncoding.EncodeToString(barcodePNG))
 
 	for _, obj := range layout.TextObjects {
-		val := fieldValues[obj.Field]
+		val := fieldValues.resolve(obj)
 		if val == "" {
 			continue
 		}
 		fontWeight := "normal"
-		if obj.Bold {
+		switch obj.Weight {
+		case WeightBold:
 			fontWeight = "bold"
+		case WeightExtraBold:
+			fontWeight = "900"
 		}
 		var transform string
 		if obj.Rotate180 {

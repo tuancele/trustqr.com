@@ -85,25 +85,24 @@ func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (gs1Exp
 	return f, nil
 }
 
-// gs1FieldValueMap builds the field->text lookup that
+// gs1FieldValues builds the field->value lookup that
 // RenderTiledGS1PDF/InjectGS1ObjectsIntoSVG use to resolve each positioned
-// TextObjectConfig, keyed by the same field names the templates editor uses.
-func gs1FieldValueMap(f gs1ExportFields) map[string]string {
-	m := map[string]string{
-		"gtin":         f.GTIN,
-		"lot":          f.Lot,
-		"serial":       f.Serial,
-		"product_code": f.ProductCode,
-		"spec":         f.Spec,
-		"size_spec":    f.SizeSpec,
+// TextObjectConfig, keyed by the same field names the templates editor
+// uses. Dates are passed through as time.Time (not pre-formatted) so each
+// text object can independently pick its own display format.
+func gs1FieldValues(f gs1ExportFields) services.GS1FieldValues {
+	return services.GS1FieldValues{
+		Fields: map[string]string{
+			"gtin":         f.GTIN,
+			"lot":          f.Lot,
+			"serial":       f.Serial,
+			"product_code": f.ProductCode,
+			"spec":         f.Spec,
+			"size_spec":    f.SizeSpec,
+		},
+		ManufactureDate: f.ManufactureDate,
+		ExpiryDate:      f.ExpiryDate,
 	}
-	if !f.ManufactureDate.IsZero() {
-		m["manufacture_date"] = f.ManufactureDate.Format("2/1/2006")
-	}
-	if !f.ExpiryDate.IsZero() {
-		m["expiry_date"] = f.ExpiryDate.Format("2/1/2006")
-	}
-	return m
 }
 
 // createGS1Units generates `quantity` brand-new physical-sticker rows for a
@@ -247,7 +246,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 			tpl.FilePath, tpl.FileType,
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
-			tpl.GS1Layout, gs1FieldValueMap(fields), barcodePNG,
+			tpl.GS1Layout, gs1FieldValues(fields), barcodePNG,
 			tokens, imageFn,
 		)
 	} else {
@@ -355,7 +354,7 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		var out []byte
 		if tpl.IsGS1 {
 			out, err = services.InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG,
-				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, gs1FieldValueMap(fields), tpl.WidthMM, tpl.HeightMM)
+				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, gs1FieldValues(fields), tpl.WidthMM, tpl.HeightMM)
 		} else {
 			out, err = services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
 		}
