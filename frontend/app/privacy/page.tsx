@@ -12,72 +12,72 @@ export default function PrivacyPage() {
             <Shield className="w-5 h-5 text-gold-400" strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gov-700">Chính sách bảo mật</h1>
-            <p className="text-sm text-gray-500">Phiên bản v1.1 · Cập nhật 2026-08-05</p>
+            <h1 className="text-2xl font-bold text-gov-700">Privacy Policy</h1>
+            <p className="text-sm text-gray-500">Version v1.1 · Updated 2026-08-05</p>
           </div>
         </div>
 
         <div className="card p-8 space-y-6 text-gray-700 leading-relaxed">
-          <Section number={1} title="Thông tin thu thập">
-            <p>Khi bạn quét mã QR, chúng tôi thu thập các nhóm thông tin sau, trong giới hạn cho phép của chính sách trình duyệt di động iOS/Android:</p>
+          <Section number={1} title="Information We Collect">
+            <p>When you scan a QR code, we collect the following categories of information, within what iOS/Android mobile browser policies allow:</p>
             <ul className="list-disc pl-6 space-y-1">
-              <li>Số điện thoại, nếu bạn nhập để kích hoạt/xác thực sản phẩm và nhận voucher</li>
-              <li>Địa chỉ IP, User-Agent, thời gian quét (để phát hiện gian lận)</li>
-              <li>Vị trí thành phố suy ra từ IP</li>
+              <li>Phone number, if you enter it to activate/verify a product and receive a voucher</li>
+              <li>IP address, User-Agent, and scan timestamp (for fraud detection)</li>
+              <li>City-level location inferred from your IP address</li>
               <li>
-                Vị trí GPS chính xác hơn — <strong>chỉ khi trình duyệt của bạn cấp quyền</strong>; nếu bạn từ chối
-                hoặc thiết bị không hỗ trợ, chúng tôi chỉ dùng vị trí suy ra từ IP ở trên
+                More precise GPS location — <strong>only if your browser grants permission</strong>; if you decline
+                or your device doesn't support it, we fall back to the IP-based location above
               </li>
-              <li>Loại thiết bị, hệ điều hành, trình duyệt — nhận diện tự động từ User-Agent, không cần xin quyền riêng</li>
-              <li>Ngôn ngữ trình duyệt, múi giờ, kích thước màn hình</li>
-              <li>Trang giới thiệu (referrer), nếu bạn mở mã QR từ một liên kết chia sẻ thay vì quét trực tiếp bằng camera</li>
+              <li>Device type, operating system, and browser — detected automatically from the User-Agent, no separate permission required</li>
+              <li>Browser language, timezone, and screen size</li>
+              <li>Referring page, if you open the QR code from a shared link instead of scanning it directly with your camera</li>
               <li>
-                Một mã định danh ẩn danh lưu trong cookie trình duyệt (<code className="text-xs bg-gray-100 px-1 py-0.5 rounded">trustqr_vid</code>)
-                để nhận biết các lượt quét lặp lại trên cùng thiết bị — <strong>không phải</strong> mã định danh thiết bị thật
-                (IMEI/IDFA/GAID), do nền tảng iOS/Android không cho phép trình duyệt web truy cập các mã này; cookie sẽ mất
-                nếu bạn xóa dữ liệu trình duyệt hoặc dùng thiết bị/trình duyệt khác
+                An anonymous identifier stored in a browser cookie (<code className="text-xs bg-gray-100 px-1 py-0.5 rounded">trustqr_vid</code>)
+                used to recognize repeat scans on the same device — <strong>not</strong> a true device identifier
+                (IMEI/IDFA/GAID), since iOS/Android platforms don't allow web browsers to access those; the cookie is lost
+                if you clear your browser data or use a different device/browser
               </li>
             </ul>
           </Section>
 
-          <Section number={2} title="Mục đích sử dụng">
+          <Section number={2} title="How We Use It">
             <ul className="list-disc pl-6 space-y-1">
-              <li>Xác thực sản phẩm chính hãng và cấp voucher ưu đãi</li>
-              <li>Phát hiện và ngăn chặn hàng giả, hàng nhái</li>
-              <li>Gửi thông báo khuyến mãi qua SMS/Zalo <strong>chỉ khi bạn đồng ý riêng</strong></li>
+              <li>Verifying genuine products and issuing promotional vouchers</li>
+              <li>Detecting and preventing counterfeit/fake goods</li>
+              <li>Sending promotional notifications via SMS/Zalo <strong>only with your separate consent</strong></li>
             </ul>
           </Section>
 
-          <Section number={3} title="Quyền của bạn theo Nghị định 13/2023/NĐ-CP">
+          <Section number={3} title="Your Rights under Vietnam's Decree 13/2023/ND-CP">
             <ul className="list-disc pl-6 space-y-1">
-              <li>Yêu cầu xem, chỉnh sửa, hoặc xóa dữ liệu cá nhân</li>
-              <li>Rút lại sự đồng ý marketing bất cứ lúc nào</li>
-              <li>Liên hệ: <a href="mailto:privacy@trustqr.com" className="text-gov-600 hover:underline">privacy@trustqr.com</a></li>
+              <li>Request to view, edit, or delete your personal data</li>
+              <li>Withdraw marketing consent at any time</li>
+              <li>Contact us: <a href="mailto:privacy@trustqr.com" className="text-gov-600 hover:underline">privacy@trustqr.com</a></li>
             </ul>
             <div className="flex flex-wrap gap-2 mt-3">
-              <Link href="/customer/unsubscribe" className="btn-secondary text-sm">Ngừng marketing</Link>
-              <Link href="/customer/deletion" className="btn-danger text-sm">Xóa dữ liệu</Link>
+              <Link href="/customer/unsubscribe" className="btn-secondary text-sm">Unsubscribe from marketing</Link>
+              <Link href="/customer/deletion" className="btn-danger text-sm">Delete my data</Link>
             </div>
           </Section>
 
-          <Section number={4} title="Bảo mật">
+          <Section number={4} title="Security">
             <p>
-              Dữ liệu được lưu trữ mã hóa trên máy chủ tại Việt Nam. Chúng tôi <strong>không chia sẻ</strong>{' '}
-              SĐT của bạn cho bên thứ ba (không đại lý, không đối tác quảng cáo).
+              Data is stored encrypted on servers located in Vietnam. We <strong>do not share</strong>{' '}
+              your phone number with any third party (no distributors, no advertising partners).
             </p>
           </Section>
 
-          <Section number={5} title="Thời gian lưu trữ">
+          <Section number={5} title="Data Retention">
             <p>
-              Dữ liệu SĐT và lịch sử kích hoạt được lưu vĩnh viễn cho mục đích truy vết chống giả,
-              trừ khi bạn yêu cầu xóa.
+              Phone number and activation history are retained indefinitely for anti-counterfeit
+              traceability purposes, unless you request deletion.
             </p>
           </Section>
         </div>
 
         <div className="text-center mt-6">
           <Link href="/" className="inline-flex items-center gap-1 text-sm text-gov-600 hover:underline">
-            <ArrowLeft className="w-3.5 h-3.5" /> Về trang chủ
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Home
           </Link>
         </div>
       </div>
