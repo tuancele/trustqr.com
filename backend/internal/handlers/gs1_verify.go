@@ -54,6 +54,7 @@ type gs1VerifyResp struct {
 	FirstScannedAt  *string `json:"first_scanned_at,omitempty"`
 	FirstScanCity   string  `json:"first_scan_city,omitempty"`
 	Warning         string  `json:"warning,omitempty"`
+	Locked          bool    `json:"locked,omitempty"`
 }
 
 func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
@@ -149,6 +150,9 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		}
 	}()
 
+	gs1Limit := getScanLimit(ctx, h.DB, "gs1")
+	locked := gs1Limit != nil && scanCount > *gs1Limit
+
 	resp := gs1VerifyResp{
 		Valid:           true,
 		GTIN:            gtin,
@@ -158,6 +162,7 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		ScanCount:       scanCount,
 		IsFirstScan:     scanCount == 1,
 		FirstScanCity:   firstScanCity,
+		Locked:          locked,
 	}
 	if expiryDate != nil {
 		resp.ExpiryDate = expiryDate.Format("2006-01-02")
@@ -194,6 +199,9 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	}
 	if status == "flagged" || status == "disabled" {
 		resp.Warning = "This code has been flagged as suspicious. Please contact the manufacturer to verify."
+	}
+	if locked {
+		resp.Warning = "This code has exceeded the maximum allowed number of scans and has been locked for security reasons. Please contact the manufacturer for assistance."
 	}
 	return c.JSON(resp)
 }

@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { Settings, Smartphone, ShieldCheck, ShieldOff, Loader2, KeyRound, AlertTriangle } from 'lucide-react';
+import { Settings, Smartphone, ShieldCheck, ShieldOff, Loader2, KeyRound, AlertTriangle, Lock, Save } from 'lucide-react';
 import { api } from '@/lib/adminApi';
 import { PageHeader, Alert } from '@/components/ui';
 
 interface Status { enabled: boolean; configured: boolean; }
 interface SetupData { secret: string; otpauth: string; qr_helper: string; }
+interface ScanLimits { qr_scan_limit: number | null; gs1_scan_limit: number | null; }
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -19,13 +20,48 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const [limitsLoading, setLimitsLoading] = useState(true);
+  const [qrLimitInput, setQrLimitInput] = useState('');
+  const [gs1LimitInput, setGs1LimitInput] = useState('');
+  const [limitsBusy, setLimitsBusy] = useState(false);
+  const [limitsError, setLimitsError] = useState<string | null>(null);
+  const [limitsSuccess, setLimitsSuccess] = useState<string | null>(null);
+
   const reload = async () => {
     const r = await api<Status>('/api/v1/admin/auth/2fa/status');
     if (r.ok && r.data) setStatus(r.data);
     setLoading(false);
   };
 
-  useEffect(() => { reload(); }, []);
+  const reloadLimits = async () => {
+    const r = await api<ScanLimits>('/api/v1/admin/settings/scan-limits');
+    if (r.ok && r.data) {
+      setQrLimitInput(r.data.qr_scan_limit == null ? '' : String(r.data.qr_scan_limit));
+      setGs1LimitInput(r.data.gs1_scan_limit == null ? '' : String(r.data.gs1_scan_limit));
+    }
+    setLimitsLoading(false);
+  };
+
+  useEffect(() => { reload(); reloadLimits(); }, []);
+
+  async function saveLimits() {
+    setLimitsError(null); setLimitsSuccess(null);
+    const qrVal = qrLimitInput.trim() === '' ? null : parseInt(qrLimitInput, 10);
+    const gs1Val = gs1LimitInput.trim() === '' ? null : parseInt(gs1LimitInput, 10);
+    if ((qrVal !== null && (Number.isNaN(qrVal) || qrVal < 1)) || (gs1Val !== null && (Number.isNaN(gs1Val) || gs1Val < 1))) {
+      setLimitsError('Số lần quét phải là số nguyên >= 1, hoặc để trống nếu không giới hạn.');
+      return;
+    }
+    setLimitsBusy(true);
+    const r = await api('/api/v1/admin/settings/scan-limits', {
+      method: 'PUT',
+      body: JSON.stringify({ qr_scan_limit: qrVal, gs1_scan_limit: gs1Val }),
+    });
+    setLimitsBusy(false);
+    if (!r.ok) { setLimitsError(r.error || 'Không thể lưu cấu hình'); return; }
+    setLimitsSuccess('Đã lưu cấu hình khoá tem.');
+    reloadLimits();
+  }
 
   async function startSetup() {
     setError(null); setSuccess(null); setCode(''); setBusy(true);
@@ -197,6 +233,59 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="card p-6 mt-6">
+        <div className="flex items-start gap-3 mb-6">
+          <div className="w-11 h-11 bg-gov-50 rounded-xl flex items-center justify-center">
+            <Lock className="w-5 h-5 text-gov-600" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-gray-900">Khoá tem theo số lần quét</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Khi một mã bị quét vượt quá số lần cho phép, hệ thống sẽ tự động khoá và báo cho người quét. Để trống nghĩa là không giới hạn.
+            </p>
+          </div>
+        </div>
+
+        {limitsSuccess && <Alert kind="success">{limitsSuccess}</Alert>}
+        {limitsError && <div className="mb-4"><Alert kind="danger">{limitsError}</Alert></div>}
+
+        {limitsLoading ? (
+          <div className="text-sm text-gray-500 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Đang tải cấu hình...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="form-label">Số lần quét tối đa cho mã QR</label>
+              <input
+                type="number" min={1} inputMode="numeric"
+                value={qrLimitInput}
+                onChange={(e) => setQrLimitInput(e.target.value)}
+                placeholder="Không giới hạn"
+                className="form-input"
+              />
+            </div>
+            <div>
+              <label className="form-label">Số lần quét tối đa cho mã GS1</label>
+              <input
+                type="number" min={1} inputMode="numeric"
+                value={gs1LimitInput}
+                onChange={(e) => setGs1LimitInput(e.target.value)}
+                placeholder="Không giới hạn"
+                className="form-input"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <button onClick={saveLimits} disabled={limitsBusy || limitsLoading} className="btn-primary">
+            {limitsBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {limitsBusy ? 'Đang lưu...' : 'Lưu cấu hình'}
+          </button>
+        </div>
       </section>
     </div>
   );

@@ -50,6 +50,7 @@ type verifyResp struct {
 	FirstScanCity   string  `json:"first_scan_city,omitempty"`
 	Status          string  `json:"status,omitempty"`
 	Warning         string  `json:"warning,omitempty"`
+	Locked          bool    `json:"locked,omitempty"`
 	Voucher         string  `json:"voucher,omitempty"`
 	SecurityCode    string  `json:"security_code,omitempty"`
 }
@@ -126,6 +127,10 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 
 	// Skip scan_logs INSERT when token is not ready — those are "curious clicks" pre-activation.
 	tokenIsReady := isReady || tokenProductID != nil
+
+	qrLimit := getScanLimit(ctx, h.DB, "qr")
+	locked := tokenIsReady && qrLimit != nil && scanCount > *qrLimit
+
 	if tokenIsReady {
 		go func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -230,6 +235,7 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 		IsActivated:     isActivated,
 		FirstScanCity:   firstScanCity,
 		Status:          status,
+		Locked:          locked,
 	}
 	if securityCode != nil {
 		resp.SecurityCode = *securityCode
@@ -246,6 +252,9 @@ func (h *QRHandler) Verify(c *fiber.Ctx) error {
 	}
 	if status == "flagged" || status == "disabled" {
 		resp.Warning = "Mã này đã bị đánh dấu nghi ngờ. Vui lòng liên hệ nhà sản xuất để xác minh."
+	}
+	if locked {
+		resp.Warning = "Mã này đã vượt quá số lần quét cho phép và đã bị khoá vì lý do bảo mật. Vui lòng liên hệ nhà sản xuất để được hỗ trợ."
 	}
 	return c.JSON(resp)
 }

@@ -2,6 +2,7 @@ import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag
 import { verifyGS1Code } from '@/lib/api';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { GtinHelp } from '@/components/GtinHelp';
+import { ScanCountHelp } from '@/components/ScanCountHelp';
 import { BuyMoreButton } from '@/components/BuyMoreModal';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,8 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
 
   if (!result || !result.valid) return <InvalidView />;
 
-  const isSuspicious = result.scan_count > 1 || !!result.warning;
+  const isLocked = !!result.locked;
+  const isSuspicious = !isLocked && (result.scan_count > 1 || !!result.warning);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gov-50 via-white to-gov-100 py-8 px-4">
@@ -60,12 +62,22 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           <p className="text-xs text-slate-500 mt-1">TrustQR GS1 Verification</p>
         </div>
 
-        <div className="rounded-2xl border-2 border-gov-200 bg-white p-4 shadow-sm flex items-center gap-4">
-          <CertifiedBadge />
+        <div className={`rounded-2xl border-2 p-4 shadow-sm flex items-center gap-4 ${isLocked ? 'border-red-300 bg-red-50' : 'border-gov-200 bg-white'}`}>
+          {isLocked ? <LockedBadge /> : <CertifiedBadge />}
           <p className="flex-1 text-sm text-slate-700 leading-relaxed">
-            This product is <span className="font-semibold text-gov-700">genuine</span>. This code has been verified{' '}
-            <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-gov-600'}`}>{result.scan_count}</span> time
-            {result.scan_count === 1 ? '' : 's'}.
+            {isLocked ? (
+              <>
+                This code has been <span className="font-semibold text-red-700">locked</span> after being verified{' '}
+                <span className="font-bold text-red-600">{result.scan_count}</span> time
+                {result.scan_count === 1 ? '' : 's'}.
+              </>
+            ) : (
+              <>
+                This product is <span className="font-semibold text-gov-700">genuine</span>. This code has been verified{' '}
+                <span className={`font-bold ${isSuspicious ? 'text-red-600' : 'text-gov-600'}`}>{result.scan_count}</span> time
+                {result.scan_count === 1 ? '' : 's'}.<ScanCountHelp />
+              </>
+            )}
           </p>
         </div>
 
@@ -136,7 +148,7 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           )}
         </div>
 
-        {result.brand_id && <BuyMoreButton code={params.code} />}
+        {result.brand_id && !isLocked && <BuyMoreButton code={params.code} />}
 
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">
           <p>© TrustQR — Anti-Counterfeit Verification System</p>
@@ -150,6 +162,14 @@ function CertifiedBadge() {
   return (
     <div className="flex-shrink-0 w-[72px] h-[72px]">
       <img src="/verified-shield-badge.png" alt="Verified genuine" className="w-full h-full object-contain" />
+    </div>
+  );
+}
+
+function LockedBadge() {
+  return (
+    <div className="flex-shrink-0 w-[72px] h-[72px] rounded-full bg-red-500 shadow-md flex items-center justify-center">
+      <ShieldX className="w-9 h-9 text-white" strokeWidth={2} />
     </div>
   );
 }

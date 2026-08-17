@@ -19,6 +19,7 @@ export interface VerifyResult {
   first_scan_city?: string;
   status?: string;
   warning?: string;
+  locked?: boolean;
   voucher?: string;
   security_code?: string;
   brand_id?: number;
@@ -141,6 +142,7 @@ export interface GS1VerifyResult {
   first_scanned_at?: string;
   first_scan_city?: string;
   warning?: string;
+  locked?: boolean;
 }
 
 export async function verifyGS1Code(code: string): Promise<GS1VerifyResult | null> {

@@ -132,6 +132,7 @@ func main() {
 	gs1SizeSpecs := &handlers.GS1SizeSpecHandler{DB: pool, Audit: audit}
 	labelLayoutPresets := &handlers.LabelLayoutPresetHandler{DB: pool, Audit: audit}
 	orders := &handlers.OrderHandler{DB: pool, Tokens: tokenSvc, Audit: audit}
+	settings := &handlers.SettingsHandler{DB: pool}
 
 	api := app.Group("/api/v1")
 
@@ -317,6 +318,10 @@ func main() {
 	protected.Get("/orders/:id", orders.Get)
 	protected.Patch("/orders/:id/status", orders.UpdateStatus)
 	protected.Delete("/orders/:id", orders.Delete)
+
+	// Global system settings (scan-limit locking for QR / GS1 codes)
+	protected.Get("/settings/scan-limits", settings.GetScanLimits)
+	protected.Put("/settings/scan-limits", settings.UpdateScanLimits)
 
 	addr := ":" + strings.TrimPrefix(cfg.AppPort, ":")
 	fmt.Printf("🚀 TrustQR API listening on %s (env=%s)\n", addr, cfg.AppEnv)

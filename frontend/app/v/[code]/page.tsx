@@ -30,7 +30,8 @@ export default async function VerifyPage({ params }: { params: { code: string } 
   // Token chưa được gán product / kích hoạt → UI riêng
   if (result.needs_activation) return <PendingActivationView code={params.code} batchCode={result.batch_code} serialNo={result.serial_no} />;
 
-  const isSuspicious = result.scan_count > 1 || result.status === 'flagged' || result.status === 'disabled';
+  const isLocked = !!result.locked;
+  const isSuspicious = !isLocked && (result.scan_count > 1 || result.status === 'flagged' || result.status === 'disabled');
   const [product, banners] = await Promise.all([
     result.product_id ? fetchProduct(result.product_id) : Promise.resolve(null),
     fetchPromoBanners(),
@@ -72,7 +73,7 @@ export default async function VerifyPage({ params }: { params: { code: string } 
         )}
 
         {/* Verification result */}
-        <ResultCard count={result.scan_count} />
+        <ResultCard count={result.scan_count} locked={isLocked} />
 
         {/* Product image slider */}
         {product?.images && product.images.length > 0 && <ImageSlider images={product.images} />}
@@ -123,13 +124,15 @@ export default async function VerifyPage({ params }: { params: { code: string } 
         )}
 
         {/* Voucher or ActivateForm */}
-        <div className="mt-4">
-          {result.is_activated && result.voucher ? (
-            <VoucherCard voucher={result.voucher} />
-          ) : (
-            <ActivateForm code={params.code} />
-          )}
-        </div>
+        {!isLocked && (
+          <div className="mt-4">
+            {result.is_activated && result.voucher ? (
+              <VoucherCard voucher={result.voucher} />
+            ) : (
+              <ActivateForm code={params.code} />
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-6 text-center text-xs text-gray-500 space-y-1">
@@ -163,8 +166,19 @@ function DesktopOnlyView() {
   );
 }
 
-function ResultCard({ count }: { count: number }) {
+function ResultCard({ count, locked }: { count: number; locked: boolean }) {
   const isRepeat = count > 1;
+  if (locked) {
+    return (
+      <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-4 shadow-sm flex items-center gap-4">
+        <LockedBadge />
+        <p className="flex-1 text-sm text-gray-800 leading-relaxed">
+          Mã này đã bị <span className="font-semibold text-red-700">khoá</span> sau khi được xác nhận{' '}
+          <span className="font-bold text-red-600">{count}</span> lần.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-2xl border-2 border-gov-200 bg-white p-4 shadow-sm flex items-center gap-4">
       <CertifiedBadge />
@@ -184,6 +198,14 @@ function CertifiedBadge() {
         <BadgeCheck className="w-8 h-8" strokeWidth={2.5} fill="white" color="#1877F2" />
         <span className="text-[7px] font-bold tracking-wide mt-0.5 leading-none">CHÍNH HÃNG</span>
       </div>
+    </div>
+  );
+}
+
+function LockedBadge() {
+  return (
+    <div className="flex-shrink-0 w-[72px] h-[72px] rounded-full bg-red-500 shadow-md flex items-center justify-center">
+      <ShieldX className="w-9 h-9 text-white" strokeWidth={2} />
     </div>
   );
 }
