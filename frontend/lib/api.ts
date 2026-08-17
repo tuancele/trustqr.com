@@ -165,6 +165,54 @@ export async function verifyGS1Code(code: string): Promise<GS1VerifyResult | nul
   }
 }
 
+export interface OrderSizeOption {
+  id: number;
+  spec: string;
+  size_spec?: string | null;
+  product_line?: string | null;
+}
+
+// Client-safe (browser fetch) helpers for the "Buy more" form on /auth/[code].
+export async function fetchGS1OrderSizes(code: string): Promise<OrderSizeOption[]> {
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  try {
+    const res = await fetch(`${publicUrl}/api/v1/gs1/order-sizes?code=${encodeURIComponent(code)}`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    return (await res.json()) as OrderSizeOption[];
+  } catch {
+    return [];
+  }
+}
+
+export async function submitGS1Order(payload: {
+  code: string;
+  customer_name: string;
+  phone: string;
+  items: { size_spec_id: number; quantity: number }[];
+}): Promise<{ ok: boolean; error?: string }> {
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  try {
+    const res = await fetch(`${publicUrl}/api/v1/gs1/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let msg = 'Có lỗi xảy ra, vui lòng thử lại.';
+      try {
+        const d = await res.json();
+        msg = d?.error || msg;
+      } catch {
+        // no body
+      }
+      return { ok: false, error: msg };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Không thể kết nối máy chủ.' };
+  }
+}
+
 export async function verifyCode(
   code: string,
   ip?: string,

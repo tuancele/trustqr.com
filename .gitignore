@@ -12,6 +12,7 @@ frontend/npm-debug.log*
 # Go build artifacts
 backend/*.exe
 backend/cmd/**/*.exe
+backend/bin/
 backend/.api.log
 *.log
 

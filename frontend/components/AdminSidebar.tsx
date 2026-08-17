@@ -24,6 +24,7 @@ import {
   GalleryHorizontal,
   ScanBarcode,
   Ruler,
+  ShoppingBag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { clearTokens } from '@/lib/adminApi';
@@ -40,6 +41,7 @@ const navItems = [
   { href: '/admin/templates',      label: 'Mẫu tem in',      icon: FileImage },
   { href: '/admin/gs1',            label: 'Mã GS1 DataMatrix', icon: ScanBarcode },
   { href: '/admin/sizes',          label: 'Size',            icon: Ruler },
+  { href: '/admin/orders',         label: 'Đơn hàng',        icon: ShoppingBag },
   { href: '/admin/tokens',         label: 'Tra cứu tem',     icon: Search },
   { href: '/admin/analytics',      label: 'Phân tích',       icon: BarChart3 },
   { href: '/admin/customers',      label: 'Khách hàng',      icon: Users },

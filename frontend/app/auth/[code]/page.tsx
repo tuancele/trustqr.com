@@ -2,6 +2,7 @@ import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag
 import { verifyGS1Code } from '@/lib/api';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
 import { GtinHelp } from '@/components/GtinHelp';
+import { BuyMoreButton } from '@/components/BuyMoreModal';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -134,6 +135,8 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
             <InfoRow icon={MapPin} label="First Scan Location" value={result.first_scan_city} />
           )}
         </div>
+
+        {result.brand_id && <BuyMoreButton code={params.code} />}
 
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">
           <p>© TrustQR — Anti-Counterfeit Verification System</p>

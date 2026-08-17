@@ -131,6 +131,7 @@ func main() {
 	gs1Verify := &handlers.GS1VerifyHandler{DB: pool, Redis: rdb, Tokens: tokenSvc, Geo: geo}
 	gs1SizeSpecs := &handlers.GS1SizeSpecHandler{DB: pool, Audit: audit}
 	labelLayoutPresets := &handlers.LabelLayoutPresetHandler{DB: pool, Audit: audit}
+	orders := &handlers.OrderHandler{DB: pool, Tokens: tokenSvc, Audit: audit}
 
 	api := app.Group("/api/v1")
 
@@ -150,6 +151,16 @@ func main() {
 	api.Post("/gs1/verify",
 		appmw.RateLimit(rdb, "gs1_verify_ip", 20, time.Minute, appmw.ClientIP),
 		gs1Verify.Verify,
+	)
+
+	// "Buy more" — public order form on the GS1 verify page (/auth/:code)
+	api.Get("/gs1/order-sizes",
+		appmw.RateLimit(rdb, "gs1_order_sizes_ip", 30, time.Minute, appmw.ClientIP),
+		orders.PublicSizeOptions,
+	)
+	api.Post("/gs1/orders",
+		appmw.RateLimit(rdb, "gs1_order_create_ip", 10, time.Minute, appmw.ClientIP),
+		orders.CreatePublic,
 	)
 
 	// Public product/company info (for verify page modal)
@@ -300,6 +311,12 @@ func main() {
 	protected.Get("/label-layout-presets", labelLayoutPresets.List)
 	protected.Post("/label-layout-presets", labelLayoutPresets.Create)
 	protected.Delete("/label-layout-presets/:id", labelLayoutPresets.Delete)
+
+	// "Buy more" orders placed by consumers from the GS1 verify page
+	protected.Get("/orders", orders.List)
+	protected.Get("/orders/:id", orders.Get)
+	protected.Patch("/orders/:id/status", orders.UpdateStatus)
+	protected.Delete("/orders/:id", orders.Delete)
 
 	addr := ":" + strings.TrimPrefix(cfg.AppPort, ":")
 	fmt.Printf("🚀 TrustQR API listening on %s (env=%s)\n", addr, cfg.AppEnv)
