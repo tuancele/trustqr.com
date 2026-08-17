@@ -34,8 +34,7 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   template_not_raster: 'Mẫu tem này là SVG — hãy dùng nút Tải ZIP (SVG).',
   template_not_vector: 'Mẫu tem này không phải SVG — hãy dùng nút Tải PDF.',
   quantity_too_large: 'Số lượng bản in vượt quá giới hạn cho phép.',
-  dm_scale_out_of_range: 'Độ nét mã không hợp lệ.',
-  datamatrix_render_failed: 'Không tạo được mã GS1 DataMatrix (có thể GTIN sai checksum).',
+  qr_px_out_of_range: 'Độ phân giải QR không hợp lệ.',
 };
 
 function errMsg(err?: string): string {
@@ -288,7 +287,7 @@ function PrintTab({ labelId }: { labelId: number }) {
   const [customH, setCustomH] = useState('');
   const [marginMM, setMarginMM] = useState(5);
   const [gutterMM, setGutterMM] = useState(2);
-  const [dmScale, setDmScale] = useState(8);
+  const [qrPx, setQrPx] = useState(320);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -349,7 +348,7 @@ function PrintTab({ labelId }: { labelId: number }) {
           sheet_h_mm: sheetPreset === 'custom' ? Number(customH) : 0,
           margin_mm: marginMM,
           gutter_mm: gutterMM,
-          dm_scale: dmScale,
+          qr_px: qrPx,
         },
         `gs1_${labelId}_labels.pdf`
       );
@@ -367,7 +366,7 @@ function PrintTab({ labelId }: { labelId: number }) {
     try {
       await downloadPost(
         `/api/v1/admin/gs1/labels/${labelId}/export-labels-svg.zip`,
-        { template_id: tpl!.id, quantity, dm_scale: dmScale },
+        { template_id: tpl!.id, quantity, qr_px: qrPx },
         `gs1_${labelId}_labels_svg.zip`
       );
     } catch (e: any) {
@@ -494,9 +493,9 @@ function PrintTab({ labelId }: { labelId: number }) {
                   onChange={(e) => setGutterMM(Number(e.target.value) || 0)} className="form-input w-28" />
               </div>
               <div>
-                <label className="form-label">Độ nét mã</label>
-                <input type="number" min={2} max={12} step="1" value={dmScale}
-                  onChange={(e) => setDmScale(Number(e.target.value) || 8)} className="form-input w-28" />
+                <label className="form-label">Độ phân giải QR (px)</label>
+                <input type="number" min={128} max={1024} step={32} value={qrPx}
+                  onChange={(e) => setQrPx(Number(e.target.value) || 320)} className="form-input w-28" />
               </div>
             </div>
 

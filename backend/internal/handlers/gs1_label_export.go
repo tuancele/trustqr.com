@@ -98,13 +98,15 @@ type gs1PDFExportBody struct {
 	SheetHMM    float64 `json:"sheet_h_mm"`
 	MarginMM    float64 `json:"margin_mm"`
 	GutterMM    float64 `json:"gutter_mm"`
-	DMScale     int     `json:"dm_scale"`
+	QRPx        int     `json:"qr_px"`
 }
 
 // ExportPDF renders a print-ready, multi-copy-per-sheet PDF of a single GS1
 // label repeated Quantity times, using a previously uploaded PNG/JPG label
 // template (the same label_templates library used by the QR-token batch
-// print flow) with the DataMatrix composited at its saved position.
+// print flow) with the consumer verify QR composited at its saved position.
+// The printed sticker carries only the verify QR — the GS1 DataMatrix stays
+// an internal/preview-only artifact (see GetLabel), it is not printed.
 func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
 	if err != nil {
@@ -127,11 +129,11 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 	if b.GutterMM <= 0 {
 		b.GutterMM = 2
 	}
-	if b.DMScale <= 0 {
-		b.DMScale = 8
+	if b.QRPx <= 0 {
+		b.QRPx = 320
 	}
-	if b.DMScale < 2 || b.DMScale > 12 {
-		return c.Status(400).JSON(fiber.Map{"error": "dm_scale_out_of_range"})
+	if b.QRPx < 128 || b.QRPx > 1024 {
+		return c.Status(400).JSON(fiber.Map{"error": "qr_px_out_of_range"})
 	}
 
 	sheetW, sheetH, err := resolveSheetSize(b.SheetPreset, b.SheetWMM, b.SheetHMM)
@@ -157,21 +159,11 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	fields, err := loadGS1LabelFields(ctx, h.DB, id)
-	if err != nil {
+	if _, err := loadGS1LabelFields(ctx, h.DB, id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
-	}
-	elementString, err := services.BuildGS1ElementString(fields)
-	if err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	dmPNG, err := services.FetchGS1DataMatrixPNG(h.PublicBaseURL, elementString, b.DMScale)
-	if err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
 	}
 
 	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
@@ -184,7 +176,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 		tokens,
-		func(tok services.LabelToken) ([]byte, error) { return services.ComposeGS1LabelImage(dmPNG, tok.URL) },
+		func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) },
 	)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
@@ -198,11 +190,11 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 type gs1SVGExportBody struct {
 	TemplateID int64 `json:"template_id"`
 	Quantity   int   `json:"quantity"`
-	DMScale    int   `json:"dm_scale"`
+	QRPx       int   `json:"qr_px"`
 }
 
-// ExportSVGZip returns a ZIP with one print-ready SVG per copy (DataMatrix
-// composited into a previously uploaded vector label template).
+// ExportSVGZip returns a ZIP with one print-ready SVG per copy (the consumer
+// verify QR composited into a previously uploaded vector label template).
 func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
 	if err != nil {
@@ -219,11 +211,11 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 	if b.Quantity > maxGS1ExportCopies {
 		return c.Status(400).JSON(fiber.Map{"error": "quantity_too_large", "max": maxGS1ExportCopies})
 	}
-	if b.DMScale <= 0 {
-		b.DMScale = 8
+	if b.QRPx <= 0 {
+		b.QRPx = 320
 	}
-	if b.DMScale < 2 || b.DMScale > 12 {
-		return c.Status(400).JSON(fiber.Map{"error": "dm_scale_out_of_range"})
+	if b.QRPx < 128 || b.QRPx > 1024 {
+		return c.Status(400).JSON(fiber.Map{"error": "qr_px_out_of_range"})
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
@@ -252,15 +244,6 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
-	elementString, err := services.BuildGS1ElementString(fields)
-	if err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	dmPNG, err := services.FetchGS1DataMatrixPNG(h.PublicBaseURL, elementString, b.DMScale)
-	if err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
-	}
 
 	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
 	if err != nil {
@@ -272,14 +255,14 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 
 	manifestBuf := &bytes.Buffer{}
 	cw := csv.NewWriter(manifestBuf)
-	cw.Write([]string{"filename", "verify_code", "gtin", "lot", "serial", "element_string"})
+	cw.Write([]string{"filename", "verify_code", "gtin", "lot", "serial"})
 
 	for i, tok := range tokens {
-		composite, err := services.ComposeGS1LabelImage(dmPNG, tok.URL)
+		qrPNG, err := services.GenerateQRPNG(tok.URL, b.QRPx)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
+			return c.Status(500).JSON(fiber.Map{"error": "qr_render_failed", "detail": err.Error()})
 		}
-		out, err := services.InjectQRIntoSVG(svgBytes, composite, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
+		out, err := services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
 		}
@@ -289,7 +272,7 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 			continue
 		}
 		fw.Write(out)
-		cw.Write([]string{filename, tok.Code, fields.GTIN, fields.Lot, fields.Serial, elementString})
+		cw.Write([]string{filename, tok.Code, fields.GTIN, fields.Lot, fields.Serial})
 	}
 	cw.Flush()
 
