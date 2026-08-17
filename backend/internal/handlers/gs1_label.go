@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,7 +19,9 @@ import (
 // the admin directly, with no dependency on the batches/qr_tokens/products
 // tables used by the existing QR-token flow.
 type GS1LabelHandler struct {
-	DB *pgxpool.Pool
+	DB            *pgxpool.Pool
+	Tokens        *services.TokenService
+	PublicBaseURL string
 }
 
 type gs1LabelReq struct {
@@ -49,15 +52,22 @@ type gs1LabelRow struct {
 	Manufacturer    *string    `json:"manufacturer"`
 	OriginCountry   *string    `json:"origin_country"`
 	CreatedAt       time.Time  `json:"created_at"`
+	VerifyCode      *string    `json:"verify_code"`
+	ScanCount       int        `json:"scan_count"`
+	FirstScannedAt  *time.Time `json:"first_scanned_at"`
+	FirstScanCity   *string    `json:"first_scan_city"`
+	Status          string     `json:"status"`
 }
 
 const gs1LabelColumns = `id, gtin, manufacture_date, expiry_date, lot, serial,
-	product_name, product_code, spec, unit, manufacturer, origin_country, created_at`
+	product_name, product_code, spec, unit, manufacturer, origin_country, created_at,
+	verify_code, scan_count, first_scanned_at, first_scan_city, status`
 
 func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 	var r gs1LabelRow
 	err := row.Scan(&r.ID, &r.GTIN, &r.ManufactureDate, &r.ExpiryDate, &r.Lot, &r.Serial,
-		&r.ProductName, &r.ProductCode, &r.Spec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.CreatedAt)
+		&r.ProductName, &r.ProductCode, &r.Spec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.CreatedAt,
+		&r.VerifyCode, &r.ScanCount, &r.FirstScannedAt, &r.FirstScanCity, &r.Status)
 	return r, err
 }
 
@@ -92,15 +102,20 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	verifyCode, err := h.Tokens.Generate()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
+	}
+
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
 	row := h.DB.QueryRow(ctx, `
 		INSERT INTO gs1_labels (gtin, manufacture_date, expiry_date, lot, serial,
-			product_name, product_code, spec, unit, manufacturer, origin_country)
-		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''))
+			product_name, product_code, spec, unit, manufacturer, origin_country, verify_code)
+		VALUES ($1, $2, NULLIF($3,'')::DATE, $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), $12)
 		RETURNING `+gs1LabelColumns, req.GTIN, mfg, req.ExpiryDate, req.Lot, req.Serial,
-		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry)
+		req.ProductName, req.ProductCode, req.Spec, req.Unit, req.Manufacturer, req.OriginCountry, verifyCode)
 
 	r, err := scanGS1LabelRow(row)
 	if err != nil {
@@ -176,6 +191,15 @@ func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 
+	// Rows created before verify_code existed — generate + persist on first access.
+	if r.VerifyCode == nil {
+		if vc, genErr := h.Tokens.Generate(); genErr == nil {
+			if _, updErr := h.DB.Exec(ctx, `UPDATE gs1_labels SET verify_code=$1 WHERE id=$2`, vc, id); updErr == nil {
+				r.VerifyCode = &vc
+			}
+		}
+	}
+
 	fields := services.GS1Fields{GTIN: r.GTIN, ManufactureDate: r.ManufactureDate, Lot: r.Lot, Serial: r.Serial}
 	if r.ExpiryDate != nil {
 		fields.ExpiryDate = *r.ExpiryDate
@@ -186,6 +210,50 @@ func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(gs1LabelDetail{gs1LabelRow: r, ElementString: elementString})
+}
+
+// -------- Verification QR image (points at /auth/:code, separate from the DataMatrix) --------
+
+func (h *GS1LabelHandler) GetQRImage(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	pixel := 320
+	if p := c.Query("px"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n >= 128 && n <= 1024 {
+			pixel = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	var verifyCode *string
+	if err := h.DB.QueryRow(ctx, `SELECT verify_code FROM gs1_labels WHERE id = $1`, id).Scan(&verifyCode); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if verifyCode == nil {
+		vc, genErr := h.Tokens.Generate()
+		if genErr != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
+		}
+		if _, err := h.DB.Exec(ctx, `UPDATE gs1_labels SET verify_code=$1 WHERE id=$2`, vc, id); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "db"})
+		}
+		verifyCode = &vc
+	}
+
+	url := fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, *verifyCode)
+	png, err := services.GenerateQRPNG(url, pixel)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "qr_gen"})
+	}
+	c.Set("Content-Type", "image/png")
+	return c.Send(png)
 }
 
 // -------- Delete a label --------

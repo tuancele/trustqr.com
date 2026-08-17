@@ -119,6 +119,43 @@ export async function fetchPromoBanners(): Promise<PromoBanner[]> {
   } catch { return []; }
 }
 
+export interface GS1VerifyResult {
+  valid: boolean;
+  gtin?: string;
+  lot?: string;
+  serial?: string;
+  manufacture_date?: string;
+  expiry_date?: string;
+  product_name?: string;
+  product_code?: string;
+  spec?: string;
+  unit?: string;
+  manufacturer?: string;
+  origin_country?: string;
+  scan_count: number;
+  is_first_scan: boolean;
+  first_scanned_at?: string;
+  first_scan_city?: string;
+  warning?: string;
+}
+
+export async function verifyGS1Code(code: string): Promise<GS1VerifyResult | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/v1/gs1/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+      cache: 'no-store',
+    });
+    if (res.status === 404) return { valid: false, scan_count: 0, is_first_scan: false };
+    if (!res.ok) return null;
+    return (await res.json()) as GS1VerifyResult;
+  } catch (e) {
+    console.error('verifyGS1Code error:', e);
+    return null;
+  }
+}
+
 export async function verifyCode(
   code: string,
   ip?: string,

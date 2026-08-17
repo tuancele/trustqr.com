@@ -26,6 +26,7 @@ const maxGS1ExportCopies = 500
 type GS1LabelExportHandler struct {
 	DB            *pgxpool.Pool
 	PublicBaseURL string
+	Tokens        *services.TokenService
 }
 
 func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (services.GS1Fields, error) {
@@ -42,6 +43,27 @@ func loadGS1LabelFields(ctx context.Context, db *pgxpool.Pool, id int64) (servic
 		f.ExpiryDate = *expiry
 	}
 	return f, nil
+}
+
+// loadOrCreateVerifyCode fetches the label's verification token, generating
+// and persisting one on the fly for rows created before verify_code existed
+// (same backfill pattern as GS1LabelHandler.GetLabel).
+func (h *GS1LabelExportHandler) loadOrCreateVerifyCode(ctx context.Context, id int64) (string, error) {
+	var verifyCode *string
+	if err := h.DB.QueryRow(ctx, `SELECT verify_code FROM gs1_labels WHERE id = $1`, id).Scan(&verifyCode); err != nil {
+		return "", err
+	}
+	if verifyCode != nil {
+		return *verifyCode, nil
+	}
+	vc, err := h.Tokens.Generate()
+	if err != nil {
+		return "", err
+	}
+	if _, err := h.DB.Exec(ctx, `UPDATE gs1_labels SET verify_code=$1 WHERE id=$2`, vc, id); err != nil {
+		return "", err
+	}
+	return vc, nil
 }
 
 type gs1PDFExportBody struct {
@@ -128,7 +150,16 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
 	}
 
-	// Same DataMatrix image for every copy — imageFn ignores the token and
+	verifyCode, err := h.loadOrCreateVerifyCode(ctx, id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
+	}
+	composite, err := services.ComposeGS1LabelImage(dmPNG, fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, verifyCode))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
+	}
+
+	// Same composite image for every copy — imageFn ignores the token and
 	// returns the pre-fetched bytes; Code just needs to be unique per cell
 	// so fpdf doesn't collide image names across copies.
 	tokens := make([]services.LabelToken, b.Quantity)
@@ -141,7 +172,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 		tokens,
-		func(services.LabelToken) ([]byte, error) { return dmPNG, nil },
+		func(services.LabelToken) ([]byte, error) { return composite, nil },
 	)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
@@ -219,7 +250,16 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{"error": "datamatrix_render_failed", "detail": err.Error()})
 	}
 
-	out, err := services.InjectQRIntoSVG(svgBytes, dmPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
+	verifyCode, err := h.loadOrCreateVerifyCode(ctx, id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "verify_code_gen_failed"})
+	}
+	composite, err := services.ComposeGS1LabelImage(dmPNG, fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, verifyCode))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "compose_failed", "detail": err.Error()})
+	}
+
+	out, err := services.InjectQRIntoSVG(svgBytes, composite, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})
 	}

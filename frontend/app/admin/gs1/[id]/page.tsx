@@ -6,9 +6,9 @@ import {
   ScanBarcode, ArrowLeft, Layers, Printer, Loader2, AlertTriangle,
   FileImage, FileArchive, Settings2, ExternalLink, XCircle,
 } from 'lucide-react';
-import { api, downloadPost } from '@/lib/adminApi';
+import { api, downloadPost, fetchBlobUrl } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert, EmptyState } from '@/components/ui';
-import { fmtDateShort } from '@/lib/utils';
+import { fmtDateShort, fmtDate } from '@/lib/utils';
 
 interface GS1LabelDetail {
   id: number;
@@ -25,6 +25,11 @@ interface GS1LabelDetail {
   origin_country: string | null;
   created_at: string;
   element_string: string;
+  verify_code: string | null;
+  scan_count: number;
+  first_scanned_at: string | null;
+  first_scan_city: string | null;
+  status: string;
 }
 
 const GS1_ERROR_LABELS: Record<string, string> = {
@@ -104,11 +109,35 @@ function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; on
 
 // ============ Overview Tab ============
 function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string }) {
+  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let revoke: string | null = null;
+    fetchBlobUrl(`/api/v1/admin/gs1/labels/${data.id}/qr.png`).then((url) => {
+      revoke = url;
+      setQrBlobUrl(url);
+    }).catch(() => setQrBlobUrl(null));
+    return () => { if (revoke) URL.revokeObjectURL(revoke); };
+  }, [data.id]);
+
+  const isSuspicious = data.scan_count > 1 || data.status !== 'active';
+
   return (
-    <div className="max-w-lg">
+    <div className="max-w-lg space-y-5">
       <div className="card p-5 space-y-4">
-        <div className="flex justify-center bg-gray-50 rounded-lg p-4">
-          <img src={imgSrc} alt="GS1 DataMatrix" className="w-48 h-48" />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col items-center gap-2 bg-gray-50 rounded-lg p-4">
+            <img src={imgSrc} alt="GS1 DataMatrix" className="w-40 h-40" />
+            <span className="text-[11px] text-gray-500 uppercase tracking-wide">DataMatrix (GS1)</span>
+          </div>
+          <div className="flex flex-col items-center gap-2 bg-gray-50 rounded-lg p-4">
+            {qrBlobUrl ? (
+              <img src={qrBlobUrl} alt="Verify QR" className="w-40 h-40" />
+            ) : (
+              <div className="w-40 h-40 flex items-center justify-center text-gray-400 text-xs">Đang tải...</div>
+            )}
+            <span className="text-[11px] text-gray-500 uppercase tracking-wide">QR xác minh (/auth)</span>
+          </div>
         </div>
         <table className="w-full text-sm">
           <tbody>
@@ -123,22 +152,53 @@ function OverviewTab({ data, imgSrc }: { data: GS1LabelDetail; imgSrc: string })
             <Row label="Đơn vị" value={data.unit} />
             <Row label="Hãng sản xuất" value={data.manufacturer} />
             <Row label="Xuất xứ" value={data.origin_country} />
+            <Row label="Mã xác minh" value={data.verify_code} mono />
           </tbody>
         </table>
-        <a
-          href={imgSrc}
-          download={`gs1_${data.lot}_${data.serial}.png`}
-          className="btn-primary w-full justify-center text-sm"
-        >
-          Tải PNG
-        </a>
+        <div className="flex gap-2">
+          <a
+            href={imgSrc}
+            download={`gs1_${data.lot}_${data.serial}.png`}
+            className="btn-primary flex-1 justify-center text-sm"
+          >
+            Tải PNG DataMatrix
+          </a>
+          {qrBlobUrl && (
+            <a
+              href={qrBlobUrl}
+              download={`gs1_${data.lot}_${data.serial}_verify.png`}
+              className="btn-secondary flex-1 justify-center text-sm"
+            >
+              Tải PNG QR xác minh
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="card p-5 space-y-1">
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Thống kê quét</h3>
+        <table className="w-full text-sm">
+          <tbody>
+            <Row
+              label="Số lần quét"
+              value={
+                <span className={isSuspicious ? 'font-bold text-red-600' : 'font-bold text-emerald-600'}>
+                  {data.scan_count}
+                </span>
+              }
+            />
+            <Row label="Quét lần đầu" value={data.first_scanned_at ? fmtDate(data.first_scanned_at) : null} />
+            <Row label="Vị trí quét đầu" value={data.first_scan_city} />
+            <Row label="Trạng thái" value={data.status} />
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
-function Row({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
-  if (!value) return null;
+function Row({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
+  if (value === null || value === undefined || value === '') return null;
   return (
     <tr className="border-b border-gray-50 last:border-0">
       <td className="py-1.5 pr-3 text-xs text-gray-500 whitespace-nowrap align-top">{label}</td>
