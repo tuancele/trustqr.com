@@ -445,13 +445,34 @@ func InjectQRIntoSVG(svgBytes, qrPNG []byte, xRatio, yRatio, sizeRatio, widthMM,
 
 // InjectGS1ObjectsIntoSVG is InjectQRIntoSVG plus a barcode <image> and the
 // template's positioned text objects, the SVG-export equivalent of
-// RenderTiledGS1PDF's compositing for GS1-flagged templates. Text
-// position/size use the same percentage-of-viewport convention as the image
-// elements (per the SVG spec, percentage lengths on properties like
-// font-size resolve against the viewport's normalized diagonal), so it stays
-// consistent with the rest of this file's resolution-independent approach.
-// fieldValues supplies the resolved value for each TextObjectConfig.Field;
-// objects whose field has no value are skipped.
+// RenderTiledGS1PDF's compositing for GS1-flagged templates. fieldValues
+// supplies the resolved value for each TextObjectConfig.Field; objects whose
+// field has no value are skipped.
+//
+// Text position/size do NOT use the same bare percentage convention as the
+// image elements. Percentages on width/height/x/y are SVG geometry lengths
+// and correctly resolve against the viewport, but font-size is a CSS
+// property: per spec a percentage there resolves against the *inherited*
+// font-size, not the viewport, so `font-size="5%"` renders at whatever the
+// consuming renderer's default text size times 0.05 happens to be — visibly
+// wrong and different from the editor/PDF export. `transform="rotate(180)"`
+// with `transform-box:fill-box` has the same portability problem: it needs
+// the renderer to support CSS transform-box, which many raw-SVG consumers
+// (print RIPs, older vector editors) do not, so the rotation pivots around
+// the wrong point.
+//
+// Instead each text object gets its own nested <svg> sub-viewport, placed
+// with the same percentage x/y/width/height as the images (safe — those are
+// geometry, not font-size), but with a viewBox sized in real millimeters
+// (measured via fpdf's Helvetica metrics, the same font/engine
+// RenderTiledGS1PDF uses) so that inside it, 1 unitless user unit == 1mm
+// uniformly in both axes. Font-size and the rotate() pivot are then given as
+// plain mm numbers in that local space — SVG treats an unsuffixed length as
+// "current user coordinate system units", so this actually scales, and
+// rotate(angle,cx,cy) with numeric cx/cy is universally supported SVG 1.1,
+// no CSS feature detection required. The mm math (sizeMM, baseline offset,
+// rotation center) mirrors RenderTiledGS1PDF's drawGS1Text exactly, so the
+// same label renders the same physical text size/position in both exports.
 func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues GS1FieldValues, widthMM, heightMM float64) ([]byte, error) {
 	const closeTag = "</svg>"
 	idx := bytes.LastIndex(svgBytes, []byte(closeTag))
@@ -472,29 +493,45 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 	fmt.Fprintf(&els, `<image x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" href="data:image/png;base64,%s" preserveAspectRatio="none"/>`,
 		layout.BarcodeXRatio*100, layout.BarcodeYRatio*100, layout.BarcodeWRatio*100, layout.BarcodeHRatio*100, base64.StdEncoding.EncodeToString(barcodePNG))
 
+	measurePdf := fpdf.New("P", "mm", "A4", "")
+	measurePdf.AddPage()
+
 	for _, obj := range layout.TextObjects {
 		val := fieldValues.resolve(obj)
 		if val == "" {
 			continue
 		}
 		fontWeight := "normal"
+		fontStyle := ""
 		switch obj.Weight {
 		case WeightBold:
 			fontWeight = "bold"
+			fontStyle = "B"
 		case WeightExtraBold:
 			fontWeight = "900"
+			fontStyle = "B"
 		}
-		// Rotate around the text element's own rendered bounding box center
-		// (transform-box: fill-box) rather than the raw (x,y) anchor point —
-		// this matches fpdf's string-width/cap-height-based center pivot and
-		// the editor's default CSS transform-origin (both center-of-glyphs),
-		// so rotated text lands in the same place across all three renderers.
-		var transform string
+
+		sizeMM := obj.SizeRatio * widthMM
+		measurePdf.SetFont("Helvetica", fontStyle, sizeMM*mmToPt)
+		textWidthMM := measurePdf.GetStringWidth(val)
+		if textWidthMM < 0.01 {
+			textWidthMM = 0.01
+		}
+		boxHeightMM := sizeMM
+		baselineLocal := boxHeightMM * gs1TextCapHeightRatio
+
+		widthPct := textWidthMM / widthMM * 100
+		heightPct := boxHeightMM / heightMM * 100
+
+		var textTransform string
 		if obj.Rotate180 {
-			transform = ` transform="rotate(180)" style="transform-box:fill-box;transform-origin:center;"`
+			textTransform = fmt.Sprintf(` transform="rotate(180, %.4f, %.4f)"`, textWidthMM/2, baselineLocal/2)
 		}
-		fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="Arial, Helvetica, sans-serif" font-weight="%s" dominant-baseline="hanging"%s>%s</text>`,
-			obj.XRatio*100, obj.YRatio*100, obj.SizeRatio*100, fontWeight, transform, escapeXMLText(val))
+
+		fmt.Fprintf(&els, `<svg x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" viewBox="0 0 %.4f %.4f" preserveAspectRatio="none" overflow="visible"><text x="0" y="%.4f" font-size="%.4f" font-family="Arial, Helvetica, sans-serif" font-weight="%s"%s>%s</text></svg>`,
+			obj.XRatio*100, obj.YRatio*100, widthPct, heightPct, textWidthMM, boxHeightMM,
+			baselineLocal, boxHeightMM, fontWeight, textTransform, escapeXMLText(val))
 	}
 
 	out := make([]byte, 0, len(svgBytes)+els.Len())
