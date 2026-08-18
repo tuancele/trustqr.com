@@ -91,7 +91,14 @@ export default function GS1LabelDetailPage({ params }: { params: { id: string } 
       <PageHeader
         icon={ScanBarcode}
         title={data.product_name || `GTIN ${data.gtin}`}
-        subtitle={`Lô ${data.lot} · Serial ${data.serial}`}
+        subtitle={
+          <>
+            Lô {data.lot} · Serial {data.serial}
+            {data.spec && (
+              <span className="text-red-600 font-semibold"> · Quy cách: {data.spec}</span>
+            )}
+          </>
+        }
       />
 
       {/* Tabs */}
