@@ -234,6 +234,24 @@ type GS1Layout struct {
 
 const mmToPt = 2.834645669
 
+// gs1UnicodeFallbacks maps characters that appear in real GS1 seed data
+// (e.g. gs1_size_specs.size_spec = "3.7mm(⌀) x 8.0mm(L)") but have no cp1252
+// codepoint at all, to the closest glyph cp1252 does have. fpdf's built-in
+// Helvetica is a base-14 PDF core font limited to cp1252/WinAnsi — passing
+// UTF-8 straight to pdf.Text() without this step corrupts every multi-byte
+// rune into mojibake.
+var gs1UnicodeFallbacks = strings.NewReplacer(
+	"⌀", "Ø", // U+2300 DIAMETER SIGN -> Ø
+	"∅", "Ø", // U+2205 EMPTY SET -> Ø
+)
+
+// gs1SanitizeText substitutes known cp1252-incompatible symbols and then
+// runs fpdf's own cp1252 translator, so val is safe to hand to pdf.Text and
+// pdf.GetStringWidth on a Helvetica core font.
+func gs1SanitizeText(tr func(string) string, s string) string {
+	return tr(gs1UnicodeFallbacks.Replace(s))
+}
+
 // RenderTiledGS1PDF is RenderTiledPDF plus a barcode image and the
 // template's positioned text objects composited into every cell. GTIN/Lot/
 // dates are the same for every physical copy in a print run (a GS1 batch's
@@ -273,6 +291,7 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 	}
 
 	barcodeOpts := fpdf.ImageOptions{ImageType: "PNG"}
+	textTr := pdf.UnicodeTranslatorFromDescriptor("")
 
 	qrSide := qrSizeRatio * labelW
 	qrOffsetX := qrXRatio * labelW
@@ -312,6 +331,7 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 			if val == "" {
 				continue
 			}
+			val = gs1SanitizeText(textTr, val)
 			sizeMM := obj.SizeRatio * labelW
 			fontStyle := ""
 			if obj.Weight == WeightBold || obj.Weight == WeightExtraBold {
