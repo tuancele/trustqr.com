@@ -126,6 +126,7 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
   const [barcode, setBarcode] = useState<BoxState>({ x: 0.1, y: 0.42, w: 0.55, h: 0.18 });
   const [textObjects, setTextObjects] = useState<TextObjState[]>([]);
   const [newFieldPick, setNewFieldPick] = useState('serial');
+  const [barcodePreviewUrl, setBarcodePreviewUrl] = useState<string | null>(null);
 
   const [presets, setPresets] = useState<LayoutPreset[]>([]);
   const [presetName, setPresetName] = useState('');
@@ -181,6 +182,36 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     ro.observe(el);
     return () => ro.disconnect();
   }, [tpl]);
+
+  // Live barcode render: same GenerateBarcodePNG call the real PDF/SVG
+  // export uses, sized to the box's current mm proportions, so the editor
+  // shows the barcode's true rendered look instead of a decorative guess.
+  // Debounced so a resize drag doesn't fire a request per pointer-move.
+  useEffect(() => {
+    if (!tpl || !tpl.is_gs1) return;
+    const pxPerMm = 12;
+    const w = Math.round(clamp(barcode.w * tpl.width_mm * pxPerMm, 20, 2000));
+    const h = Math.round(clamp(barcode.h * tpl.height_mm * pxPerMm, 20, 2000));
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const timer = setTimeout(() => {
+      fetchBlobUrl(`/api/v1/admin/templates/${templateId}/barcode-preview?w=${w}&h=${h}&data=${encodeURIComponent(DEMO_VALUES.serial)}`)
+        .then((url) => {
+          if (cancelled) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          objectUrl = url;
+          setBarcodePreviewUrl(url);
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [tpl, templateId, barcode.w, barcode.h]);
 
   const aspectWH = tpl ? tpl.width_mm / tpl.height_mm : 1;
   const qrHeightRatio = clamp(qr.size * aspectWH, 0, 1);
@@ -384,14 +415,19 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
               />
             )}
 
+            {/* Border lives on an outward-offset overlay, not on this box
+                itself — a border here would inset its visible area by its
+                own width, off the true qr_x_ratio/qr_y_ratio anchor that the
+                PDF/SVG export places the (borderless) QR image at. */}
             <div
-              className="absolute border-2 border-gov-500 bg-gov-500/20 cursor-move flex items-start justify-start"
+              className="absolute bg-gov-500/20 cursor-move flex items-start justify-start"
               style={{
                 left: `${qr.x * 100}%`, top: `${qr.y * 100}%`,
                 width: `${qr.size * 100}%`, height: `${qrHeightRatio * 100}%`,
               }}
               onPointerDown={(e) => onBoxPointerDown(e, 'qr', 'move')}
             >
+              <div className="absolute -inset-0.5 border-2 border-gov-500 pointer-events-none" />
               <span className="text-[10px] font-semibold text-gov-700 bg-white/80 px-1 rounded pointer-events-none">
                 QR
               </span>
@@ -404,21 +440,28 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
             {tpl.is_gs1 && (
               <>
                 <div
-                  className="absolute border-2 border-violet-500 bg-violet-500/20 cursor-move flex items-center justify-center overflow-hidden"
+                  className="absolute bg-violet-500/10 cursor-move flex items-center justify-center overflow-hidden"
                   style={{
                     left: `${barcode.x * 100}%`, top: `${barcode.y * 100}%`,
                     width: `${barcode.w * 100}%`, height: `${barcode.h * 100}%`,
                   }}
                   onPointerDown={(e) => onBoxPointerDown(e, 'barcode', 'move')}
                 >
-                  <span className="text-[10px] font-semibold text-violet-700 bg-white/80 px-1 rounded pointer-events-none absolute top-0.5 left-0.5">
+                  <div className="absolute -inset-0.5 border-2 border-violet-500 pointer-events-none z-10" />
+                  <span className="text-[10px] font-semibold text-violet-700 bg-white/80 px-1 rounded pointer-events-none absolute top-0.5 left-0.5 z-10">
                     Barcode
                   </span>
-                  <div className="w-full h-full flex items-center justify-center gap-[2px] px-2 pointer-events-none opacity-60">
-                    {Array.from({ length: 24 }).map((_, i) => (
-                      <div key={i} className="bg-violet-800 h-3/5" style={{ width: i % 3 === 0 ? '3px' : '1.5px' }} />
-                    ))}
-                  </div>
+                  {barcodePreviewUrl ? (
+                    // object-fill: matches export exactly — both the PDF and SVG
+                    // paths stretch the generated barcode into this same ratio box.
+                    <img
+                      src={barcodePreviewUrl}
+                      alt="Barcode preview"
+                      className="w-full h-full object-fill pointer-events-none"
+                    />
+                  ) : (
+                    <Loader2 className="w-4 h-4 animate-spin text-violet-400 pointer-events-none" />
+                  )}
                   <div
                     className="absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 bg-violet-600 rounded-full border-2 border-white cursor-nwse-resize"
                     onPointerDown={(e) => onBoxPointerDown(e, 'barcode', 'resize')}
@@ -644,19 +687,25 @@ function TextBox({
   const c = TEXT_COLOR_STYLES[colorKey];
   const fontSizePx = Math.max(state.size * containerWidthPx, 8);
   return (
+    // No border/padding on this positioned element — either would offset the
+    // value span's visible top-left away from (x_ratio, y_ratio), which is
+    // exactly the "few px" drift vs. the PDF/SVG export (they anchor the
+    // glyph itself, with nothing decorative added). The border below is a
+    // separate, outward-offset overlay so it doesn't touch this anchor.
     <div
-      className={`absolute border-2 ${c.border} ${c.bg} cursor-move flex items-center px-1 whitespace-nowrap`}
+      className="absolute cursor-move whitespace-nowrap"
       style={{ left: `${state.x * 100}%`, top: `${state.y * 100}%` }}
       onPointerDown={onMoveDown}
     >
-      <span className={`text-[9px] font-semibold ${c.text} bg-white/80 px-1 rounded pointer-events-none absolute -top-4 left-0`}>
+      <div className={`absolute -inset-1 border-2 ${c.border} ${c.bg} rounded-sm pointer-events-none`} />
+      <span className={`text-[9px] font-semibold ${c.text} bg-white/80 px-1 rounded pointer-events-none absolute -top-5 left-0`}>
         {label}
       </span>
       <span
-        className={`${c.text} pointer-events-none`}
+        className={`${c.text} pointer-events-none relative inline-block`}
         style={{
           fontSize: `${fontSizePx}px`,
-          lineHeight: 1.1,
+          lineHeight: 1,
           fontFamily: 'Arial, Helvetica, sans-serif',
           fontWeight: { regular: 400, bold: 700, extrabold: 900 }[state.weight],
           transform: state.rotate180 ? 'rotate(180deg)' : undefined,
@@ -665,7 +714,7 @@ function TextBox({
         {value}
       </span>
       <div
-        className={`absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 ${c.dot} rounded-full border-2 border-white cursor-nwse-resize`}
+        className={`absolute -right-2.5 -bottom-2.5 w-3.5 h-3.5 ${c.dot} rounded-full border-2 border-white cursor-nwse-resize`}
         onPointerDown={onResizeDown}
       />
     </div>

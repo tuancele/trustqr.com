@@ -318,12 +318,14 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 				fontStyle = "B"
 			}
 			pdf.SetFont("Helvetica", fontStyle, sizeMM*mmToPt)
-			// pdf.Text's y is the text baseline; adding the font's mm height
-			// to the ratio-derived top offset approximates a top-left
-			// anchor, so objects line up with the barcode/QR boxes the same
-			// way the position editor shows them (top-left origin).
+			// pdf.Text's y is the text baseline; Helvetica's cap height is
+			// ~72% of its em size, so adding that fraction (not the full
+			// em) of the font's mm size to the ratio-derived top offset
+			// approximates a top-left anchor at the visible glyph top —
+			// matching the SVG export's dominant-baseline="hanging" and the
+			// position editor's top-left-anchored box.
 			tx := cellX + obj.XRatio*labelW
-			ty := cellY + obj.YRatio*labelH + sizeMM
+			ty := cellY + obj.YRatio*labelH + sizeMM*gs1TextCapHeightRatio
 			drawGS1Text(pdf, val, tx, ty, sizeMM, obj.Weight, obj.Rotate180)
 		}
 
@@ -348,6 +350,12 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 // blur/double the glyph at normal viewing size.
 const gs1ExtraBoldOffsetMM = 0.12
 
+// gs1TextCapHeightRatio approximates Helvetica's cap height as a fraction of
+// its em size, used to convert the ratio-derived top-left anchor into the
+// baseline y that pdf.Text expects (see RenderTiledGS1PDF) and to find the
+// glyph's visual vertical center for 180-degree rotation below.
+const gs1TextCapHeightRatio = 0.72
+
 // drawGS1Text draws val at baseline (tx,ty), optionally rotated 180 degrees
 // around its own visual center. fpdf's Helvetica only ships Regular and
 // Bold font programs (no true Extra Bold), so WeightExtraBold is faked by
@@ -364,7 +372,7 @@ func drawGS1Text(pdf *fpdf.Fpdf, val string, tx, ty, sizeMM float64, weight stri
 	}
 	if rotate180 {
 		cx := tx + pdf.GetStringWidth(val)/2
-		cy := ty - sizeMM/2
+		cy := ty - sizeMM*gs1TextCapHeightRatio/2
 		pdf.TransformBegin()
 		pdf.TransformRotate(180, cx, cy)
 		for _, o := range offsets {
@@ -456,9 +464,14 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 		case WeightExtraBold:
 			fontWeight = "900"
 		}
+		// Rotate around the text element's own rendered bounding box center
+		// (transform-box: fill-box) rather than the raw (x,y) anchor point —
+		// this matches fpdf's string-width/cap-height-based center pivot and
+		// the editor's default CSS transform-origin (both center-of-glyphs),
+		// so rotated text lands in the same place across all three renderers.
 		var transform string
 		if obj.Rotate180 {
-			transform = fmt.Sprintf(` transform="rotate(180, %.4f%%, %.4f%%)"`, obj.XRatio*100, obj.YRatio*100)
+			transform = ` transform="rotate(180)" style="transform-box:fill-box;transform-origin:center;"`
 		}
 		fmt.Fprintf(&els, `<text x="%.4f%%" y="%.4f%%" font-size="%.4f%%" font-family="Arial, Helvetica, sans-serif" font-weight="%s" dominant-baseline="hanging"%s>%s</text>`,
 			obj.XRatio*100, obj.YRatio*100, obj.SizeRatio*100, fontWeight, transform, escapeXMLText(val))

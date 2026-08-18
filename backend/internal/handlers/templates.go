@@ -423,3 +423,43 @@ func (h *TemplateHandler) Preview(c *fiber.Ctx) error {
 	c.Set("Cache-Control", "private, max-age=300")
 	return c.Send(data)
 }
+
+// -------- ADMIN: BarcodePreview (live Code128 render, for the position editor) --------
+
+const (
+	barcodePreviewMinPx = 20
+	barcodePreviewMaxPx = 2000
+)
+
+// BarcodePreview renders a real Code128 PNG for the given data/size so the
+// position editor can show the barcode's true proportions instead of a
+// decorative placeholder. It uses the same services.GenerateBarcodePNG call
+// as the actual PDF/SVG export, so stretching this image into the editor's
+// ratio-sized box with object-fill reproduces exactly what export produces.
+func (h *TemplateHandler) BarcodePreview(c *fiber.Ctx) error {
+	data := c.Query("data")
+	if data == "" {
+		data = "A25L3509810"
+	}
+	w, err := strconv.Atoi(c.Query("w"))
+	if err != nil {
+		w = 600
+	}
+	ht, err := strconv.Atoi(c.Query("h"))
+	if err != nil {
+		ht = 200
+	}
+	if w < barcodePreviewMinPx || w > barcodePreviewMaxPx || ht < barcodePreviewMinPx || ht > barcodePreviewMaxPx {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_dimensions"})
+	}
+
+	png, err := services.GenerateBarcodePNG(data, w, ht)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "barcode_generate_failed"})
+	}
+
+	c.Set("Content-Type", "image/png")
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("Cache-Control", "private, max-age=60")
+	return c.Send(png)
+}
