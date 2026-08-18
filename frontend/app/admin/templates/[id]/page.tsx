@@ -474,6 +474,8 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
                 {textObjects.map((t, i) => (
                   <TextBox
                     key={t.id}
+                    templateId={templateId}
+                    widthMM={tpl.width_mm}
                     label={FIELD_LABELS[t.field] || t.field}
                     value={demoValueFor(t.field, t.dateFormat)}
                     state={t}
@@ -677,8 +679,10 @@ const TEXT_COLOR_STYLES: Record<TextColorKey, { border: string; bg: string; text
 };
 
 function TextBox({
-  label, value, state, colorKey, containerWidthPx, onMoveDown, onResizeDown,
+  templateId, widthMM, label, value, state, colorKey, containerWidthPx, onMoveDown, onResizeDown,
 }: {
+  templateId: number;
+  widthMM: number;
   label: string;
   value: string;
   state: TextObjState;
@@ -689,6 +693,41 @@ function TextBox({
 }) {
   const c = TEXT_COLOR_STYLES[colorKey];
   const fontSizePx = Math.max(state.size * containerWidthPx, 8);
+  const sizeMM = state.size * widthMM;
+
+  // The PDF/SVG export pivots 180-degree rotation around a point computed
+  // from fpdf's built-in Helvetica metrics (see MeasureGS1Text), not
+  // whatever font the browser substitutes for "Arial, Helvetica,
+  // sans-serif". Left to its default, this span's transform-origin would
+  // instead be the center of its own browser-rendered box — a different
+  // point — so a rotated object's on-screen pivot silently drifts from
+  // where export actually rotates it. Fetching the same Helvetica numbers
+  // the exports use and setting transform-origin explicitly (in px, from
+  // this span's own top-left) keeps the editor's rotation WYSIWYG.
+  const [metrics, setMetrics] = useState<{ widthMM: number; capHeightMM: number } | null>(null);
+  useEffect(() => {
+    if (!state.rotate180 || sizeMM <= 0) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api<{ width_mm: number; cap_height_mm: number }>(
+        `/api/v1/admin/templates/${templateId}/text-metrics?value=${encodeURIComponent(value)}&size_mm=${sizeMM}&weight=${state.weight}`
+      ).then((r) => {
+        if (!cancelled && r.ok && r.data) {
+          setMetrics({ widthMM: r.data.width_mm, capHeightMM: r.data.cap_height_mm });
+        }
+      }).catch(() => {});
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [templateId, value, sizeMM, state.weight, state.rotate180]);
+
+  const pxPerMm = widthMM > 0 ? containerWidthPx / widthMM : 0;
+  const transformOrigin = state.rotate180 && metrics
+    ? `${(metrics.widthMM / 2) * pxPerMm}px ${(metrics.capHeightMM / 2) * pxPerMm}px`
+    : undefined;
+
   return (
     // No border/padding on this positioned element — either would offset the
     // value span's visible top-left away from (x_ratio, y_ratio), which is
@@ -700,26 +739,41 @@ function TextBox({
       style={{ left: `${state.x * 100}%`, top: `${state.y * 100}%` }}
       onPointerDown={onMoveDown}
     >
-      <div className={`absolute -inset-1 border-2 ${c.border} ${c.bg} rounded-sm pointer-events-none`} />
       <span className={`text-[9px] font-semibold ${c.text} bg-white/80 px-1 rounded pointer-events-none absolute -top-5 left-0`}>
         {label}
       </span>
-      <span
-        className={`${c.text} pointer-events-none relative inline-block`}
+      {/* Border + resize handle rotate together with the text around the
+          same export-accurate pivot (transformOrigin below), instead of
+          only the glyph itself — otherwise the selection frame stays at
+          the un-rotated layout box while the text visually moves to its
+          true (correct) position, making the frame look "off" even though
+          the text itself now matches export. This div's own top-left
+          coincides with the wrapper's above (no margin/padding between
+          them), so it can reuse the same pivot coordinates unchanged. */}
+      <div
+        className="relative inline-block"
         style={{
-          fontSize: `${fontSizePx}px`,
-          lineHeight: 1,
-          fontFamily: 'Arial, Helvetica, sans-serif',
-          fontWeight: { regular: 400, bold: 700, extrabold: 900 }[state.weight],
           transform: state.rotate180 ? 'rotate(180deg)' : undefined,
+          transformOrigin,
         }}
       >
-        {value}
-      </span>
-      <div
-        className={`absolute -right-2.5 -bottom-2.5 w-3.5 h-3.5 ${c.dot} rounded-full border-2 border-white cursor-nwse-resize`}
-        onPointerDown={onResizeDown}
-      />
+        <div className={`absolute -inset-1 border-2 ${c.border} ${c.bg} rounded-sm pointer-events-none`} />
+        <span
+          className={`${c.text} pointer-events-none relative inline-block`}
+          style={{
+            fontSize: `${fontSizePx}px`,
+            lineHeight: 1,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fontWeight: { regular: 400, bold: 700, extrabold: 900 }[state.weight],
+          }}
+        >
+          {value}
+        </span>
+        <div
+          className={`absolute -right-2.5 -bottom-2.5 w-3.5 h-3.5 ${c.dot} rounded-full border-2 border-white cursor-nwse-resize`}
+          onPointerDown={onResizeDown}
+        />
+      </div>
     </div>
   );
 }

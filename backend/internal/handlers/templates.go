@@ -463,3 +463,24 @@ func (h *TemplateHandler) BarcodePreview(c *fiber.Ctx) error {
 	c.Set("Cache-Control", "private, max-age=60")
 	return c.Send(png)
 }
+
+// -------- ADMIN: TextMetrics (Helvetica width/cap-height, for the position editor) --------
+
+const textMetricsMaxSizeMM = 500
+
+// TextMetrics returns the same Helvetica-based width and cap-height that
+// RenderTiledGS1PDF/InjectGS1ObjectsIntoSVG use for a GS1 text object, so the
+// position editor can pivot 180-degree rotation around the exact point the
+// exports do instead of the browser's own substituted font metrics — the two
+// otherwise silently diverge because no browser ships fpdf's core Helvetica.
+func (h *TemplateHandler) TextMetrics(c *fiber.Ctx) error {
+	val := c.Query("value")
+	sizeMM, err := strconv.ParseFloat(c.Query("size_mm"), 64)
+	if err != nil || sizeMM <= 0 || sizeMM > textMetricsMaxSizeMM {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_size_mm"})
+	}
+	weight := c.Query("weight", services.WeightRegular)
+
+	widthMM, capHeightMM := services.MeasureGS1Text(val, sizeMM, weight)
+	return c.JSON(fiber.Map{"width_mm": widthMM, "cap_height_mm": capHeightMM})
+}

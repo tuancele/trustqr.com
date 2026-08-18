@@ -376,6 +376,25 @@ const gs1ExtraBoldOffsetMM = 0.12
 // glyph's visual vertical center for 180-degree rotation below.
 const gs1TextCapHeightRatio = 0.72
 
+// MeasureGS1Text returns the rendered width and cap-height of val at sizeMM
+// using the exact same Helvetica metrics as RenderTiledGS1PDF/drawGS1Text and
+// InjectGS1ObjectsIntoSVG. The position editor calls this (via the
+// text-metrics endpoint) to compute its own 180-degree rotation pivot from
+// the same numbers the PDF/SVG export use, instead of the browser's own
+// substituted font metrics — otherwise a rotated object's on-screen pivot
+// silently drifts from where export actually rotates it.
+func MeasureGS1Text(val string, sizeMM float64, weight string) (widthMM, capHeightMM float64) {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	fontStyle := ""
+	if weight == WeightBold || weight == WeightExtraBold {
+		fontStyle = "B"
+	}
+	pdf.SetFont("Helvetica", fontStyle, sizeMM*mmToPt)
+	textTr := pdf.UnicodeTranslatorFromDescriptor("")
+	return pdf.GetStringWidth(gs1SanitizeText(textTr, val)), sizeMM * gs1TextCapHeightRatio
+}
+
 // drawGS1Text draws val at baseline (tx,ty), optionally rotated 180 degrees
 // around its own visual center. fpdf's Helvetica only ships Regular and
 // Bold font programs (no true Extra Bold), so WeightExtraBold is faked by

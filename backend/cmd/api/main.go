@@ -315,6 +315,7 @@ func main() {
 	protected.Delete("/templates/:id", templates.Delete)
 	protected.Get("/templates/:id/preview", templates.Preview)
 	protected.Get("/templates/:id/barcode-preview", templates.BarcodePreview)
+	protected.Get("/templates/:id/text-metrics", templates.TextMetrics)
 
 	// Saved GS1 object-position layouts (reuse a finished arrangement on another template)
 	protected.Get("/label-layout-presets", labelLayoutPresets.List)
