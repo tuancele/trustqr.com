@@ -44,3 +44,9 @@ require (
 	golang.org/x/sys v0.25.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
 )
+
+// Local patch: fix oksvg AddArcFromA reusing the wrong points slice for
+// chained arc groups within a single SVG path A/a command, which was
+// producing garbled/blob rasterization on arc-heavy production SVG
+// templates (see backend/third_party/oksvg/path_cursor.go).
+replace github.com/srwiley/oksvg => ./third_party/oksvg
