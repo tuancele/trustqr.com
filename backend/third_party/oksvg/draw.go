@@ -76,6 +76,7 @@ var (
 	gF    svgFunc = func(*IconCursor, []xml.Attr) error { return nil } // g does nothing but push the style
 	rectF svgFunc = func(c *IconCursor, attrs []xml.Attr) error {
 		var x, y, w, h, rx, ry float64
+		var hasRx, hasRy bool
 		var err error
 		for _, attr := range attrs {
 			switch attr.Name.Local {
@@ -89,8 +90,10 @@ var (
 				h, err = parseFloat(attr.Value, 64)
 			case "rx":
 				rx, err = parseFloat(attr.Value, 64)
+				hasRx = true
 			case "ry":
 				ry, err = parseFloat(attr.Value, 64)
+				hasRy = true
 			}
 			if err != nil {
 				return err
@@ -98,6 +101,12 @@ var (
 		}
 		if w == 0 || h == 0 {
 			return nil
+		}
+		// Per SVG spec, when only one of rx/ry is given, the other defaults to it.
+		if hasRx && !hasRy {
+			ry = rx
+		} else if hasRy && !hasRx {
+			rx = ry
 		}
 		rasterx.AddRoundRect(x, y, w+x, h+y, rx, ry, 0, rasterx.RoundGap, &c.Path)
 		return nil
