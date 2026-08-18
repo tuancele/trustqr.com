@@ -25,6 +25,7 @@ type IconCursor struct {
 	grad                                                 *rasterx.Gradient
 	inTitleText, inDescText, inGrad, inDefs, inDefsStyle bool
 	currentDef                                           []definition
+	elemOrder                                            int
 }
 
 // ReadGradURL reads an SVG format gradient url
@@ -140,7 +141,7 @@ func (c *IconCursor) readTransformAttr(m1 rasterx.Matrix2D, k string) (rasterx.M
 		}
 	case "scale":
 		if ln == 1 {
-			m1 = m1.Scale(c.points[0], 0)
+			m1 = m1.Scale(c.points[0], c.points[0])
 		} else if ln == 2 {
 			m1 = m1.Scale(c.points[0], c.points[1])
 		} else {
@@ -342,6 +343,9 @@ func (c *IconCursor) readStartElement(se xml.StartElement) (err error) {
 		})
 		return nil
 	}
+	if se.Name.Local == "image" {
+		return c.readImageElement(se.Attr)
+	}
 	df, ok := drawFuncs[se.Name.Local]
 	if !ok {
 		errStr := "Cannot process svg element " + se.Name.Local
@@ -364,10 +368,61 @@ func (c *IconCursor) readStartElement(se xml.StartElement) (err error) {
 		pathCopy := make(rasterx.Path, len(c.Path))
 		copy(pathCopy, c.Path)
 		c.icon.SVGPaths = append(c.icon.SVGPaths,
-			SvgPath{c.StyleStack[len(c.StyleStack)-1], pathCopy})
+			SvgPath{c.StyleStack[len(c.StyleStack)-1], pathCopy, c.elemOrder})
+		c.elemOrder++
 		c.Path = c.Path[:0]
 	}
 	return
+}
+
+// readImageElement handles an <image> element: it decodes an embedded
+// data-URI raster image and records its placement rect plus the current
+// cumulative transform (ancestor <g transform> chain and this element's
+// own transform, both already folded into the top of StyleStack by
+// PushStyle) so it can be composited at Draw time in document order
+// alongside the vector paths.
+func (c *IconCursor) readImageElement(attrs []xml.Attr) error {
+	var x, y, w, h float64
+	var href string
+	var err error
+	for _, attr := range attrs {
+		switch attr.Name.Local {
+		case "x":
+			x, err = parseFloat(attr.Value, 64)
+		case "y":
+			y, err = parseFloat(attr.Value, 64)
+		case "width":
+			w, err = parseFloat(attr.Value, 64)
+		case "height":
+			h, err = parseFloat(attr.Value, 64)
+		case "href":
+			href = attr.Value
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if href == "" || w <= 0 || h <= 0 {
+		return nil
+	}
+	img, decErr := decodeDataURIImage(href)
+	if decErr != nil {
+		// Unsupported/unreadable image source (e.g. external file
+		// reference): skip it rather than failing the whole parse,
+		// consistent with how unrecognized elements are handled.
+		if c.returnError("image decode failed: " + decErr.Error()) {
+			return decErr
+		}
+		return nil
+	}
+	c.icon.Images = append(c.icon.Images, SvgImage{
+		Image: img,
+		X:     x, Y: y, W: w, H: h,
+		M:     c.StyleStack[len(c.StyleStack)-1].mAdder.M,
+		Order: c.elemOrder,
+	})
+	c.elemOrder++
+	return nil
 }
 
 func (c *IconCursor) adaptClasses(pathStyle *PathStyle, className string) {

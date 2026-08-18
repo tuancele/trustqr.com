@@ -83,7 +83,7 @@ func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 
 	scanner := rasterx.NewScannerGV(widthPx, heightPx, img, img.Bounds())
 	dasher := rasterx.NewDasher(widthPx, heightPx, scanner)
-	icon.Draw(dasher, 1.0)
+	icon.DrawToTarget(dasher, img, 1.0)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

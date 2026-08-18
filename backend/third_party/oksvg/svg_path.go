@@ -15,7 +15,8 @@ import (
 // SvgPath binds a style to a path.
 type SvgPath struct {
 	PathStyle
-	Path rasterx.Path
+	Path  rasterx.Path
+	Order int
 }
 
 // Draw the compiled SvgPath into the Dasher.
