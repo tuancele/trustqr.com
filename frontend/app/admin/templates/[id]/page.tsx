@@ -270,14 +270,14 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
       if (drag.mode === 'move') {
         setBarcode({ ...s, x: clamp(s.x + dx, 0, 1 - s.w), y: clamp(s.y + dy, 0, 1 - s.h) });
       } else {
-        // Drag handle stretches both dimensions together, locked to the
-        // box's own aspect ratio at drag-start — the drag no longer
-        // distorts the real barcode image out of its rendered proportions.
-        const aspect = s.w / s.h;
-        const maxBySpaceX = 1 - s.x;
-        const maxBySpaceY = (1 - s.y) * aspect;
-        const w = clamp(s.w + dx, 0.02, Math.min(maxBySpaceX, maxBySpaceY));
-        setBarcode({ ...s, w, h: w / aspect });
+        // Independent width/height drag: a 1D barcode has no fixed aspect
+        // ratio (width tracks encoded data length, height is a free
+        // physical choice), so unlike the QR box this stays unlocked.
+        setBarcode({
+          ...s,
+          w: clamp(s.w + dx, 0.02, 1 - s.x),
+          h: clamp(s.h + dy, 0.02, 1 - s.y),
+        });
       }
     } else if (drag.startText) {
       const s = drag.startText;
