@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"time"
@@ -38,6 +39,26 @@ func mmToPxAtDPI(mm, dpi float64) int {
 	}
 	if px > 3000 {
 		return 3000
+	}
+	return px
+}
+
+// gs1LabelRasterDPI is the resolution an SVG template's background is
+// rasterized at before print-PDF tiling. Go has no in-process SVG->PDF
+// vector converter, so this is what keeps an SVG-sourced label looking as
+// sharp as the native PNG/JPG export path at normal print/handling sizes.
+const gs1LabelRasterDPI = 600.0
+
+// gs1LabelRasterPx is mmToPxAtDPI's clamp widened for a full label
+// background (up to a whole sheet-sized template) rather than a small
+// barcode sub-image.
+func gs1LabelRasterPx(mm float64) int {
+	px := int(mm / 25.4 * gs1LabelRasterDPI)
+	if px < 100 {
+		return 100
+	}
+	if px > 8000 {
+		return 8000
 	}
 	return px
 }
@@ -220,10 +241,6 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
-	if tpl.FileType != "png" && tpl.FileType != "jpg" {
-		return c.Status(400).JSON(fiber.Map{"error": "template_not_raster"})
-	}
-
 	if _, err := services.GridLayout(sheetW, sheetH, b.MarginMM, b.GutterMM, tpl.WidthMM, tpl.HeightMM); err != nil {
 		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -245,6 +262,28 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
+	var templateSrc io.Reader
+	templateType := tpl.FileType
+	if tpl.FileType == "svg" {
+		svgBytes, readErr := os.ReadFile(tpl.FilePath)
+		if readErr != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "template_file_read"})
+		}
+		rasterPNG, rasterErr := services.RasterizeSVG(svgBytes, gs1LabelRasterPx(tpl.WidthMM), gs1LabelRasterPx(tpl.HeightMM))
+		if rasterErr != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "svg_rasterize_failed", "detail": rasterErr.Error()})
+		}
+		templateSrc = bytes.NewReader(rasterPNG)
+		templateType = "png"
+	} else {
+		tplFile, openErr := os.Open(tpl.FilePath)
+		if openErr != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "template_file_read"})
+		}
+		defer tplFile.Close()
+		templateSrc = tplFile
+	}
+
 	imageFn := func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) }
 
 	var pdfBytes []byte
@@ -261,7 +300,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 			return fv, barcodePNG, nil
 		}
 		pdfBytes, err = services.RenderTiledGS1PDF(
-			tpl.FilePath, tpl.FileType,
+			templateSrc, templateType,
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 			tpl.GS1Layout,
@@ -269,7 +308,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		)
 	} else {
 		pdfBytes, err = services.RenderTiledPDF(
-			tpl.FilePath, tpl.FileType,
+			templateSrc, templateType,
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 			tokens, imageFn,

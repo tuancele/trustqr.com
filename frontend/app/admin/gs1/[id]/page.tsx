@@ -39,8 +39,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 const GS1_ERROR_LABELS: Record<string, string> = {
   not_found: 'Không tìm thấy mã này.',
   template_not_found: 'Không tìm thấy mẫu tem.',
-  template_not_raster: 'Mẫu tem này là SVG — hãy dùng nút Tải ZIP (SVG).',
   template_not_vector: 'Mẫu tem này không phải SVG — hãy dùng nút Tải PDF.',
+  template_file_read: 'Không đọc được file mẫu tem trên server.',
+  svg_rasterize_failed: 'Không xử lý được file SVG của mẫu tem này.',
   quantity_too_large: 'Số lượng bản in vượt quá giới hạn cho phép.',
   qr_px_out_of_range: 'Độ phân giải QR không hợp lệ.',
   gtin_must_be_8_to_14_digits: 'GTIN phải là số, từ 8 đến 14 chữ số.',
@@ -475,7 +476,7 @@ function PrintTab({ labelId }: { labelId: number }) {
 
   let grid: { cols: number; rows: number } | null = null;
   let gridError: string | null = null;
-  if (tpl && tpl.file_type !== 'svg' && sheetDims) {
+  if (tpl && sheetDims) {
     const usableW = sheetDims[0] - 2 * marginMM;
     const usableH = sheetDims[1] - 2 * marginMM;
     if (usableW <= 0 || usableH <= 0) {
@@ -613,7 +614,7 @@ function PrintTab({ labelId }: { labelId: number }) {
           </div>
         </div>
 
-        {tpl && tpl.file_type !== 'svg' && (
+        {tpl && (
           <>
             {/* Sheet size */}
             <div>
@@ -678,17 +679,18 @@ function PrintTab({ labelId }: { labelId: number }) {
 
         {error && <Alert kind="danger" icon={AlertTriangle}>{errMsg(error)}</Alert>}
 
-        {tpl?.file_type === 'svg' ? (
-          <button type="button" onClick={exportSVGZip} disabled={busy} className="btn-primary">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
-            {busy ? 'Đang xuất...' : `Tải ZIP (SVG) — ${quantity} tem`}
-          </button>
-        ) : (
+        <div className="flex flex-wrap gap-2">
           <button type="button" onClick={exportPDF} disabled={busy || !!gridError} className="btn-primary">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
             {busy ? 'Đang xuất...' : `Tải PDF — ${quantity} tem`}
           </button>
-        )}
+          {tpl?.file_type === 'svg' && (
+            <button type="button" onClick={exportSVGZip} disabled={busy} className="btn-secondary">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
+              {busy ? 'Đang xuất...' : `Tải ZIP (SVG) — ${quantity} tem`}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

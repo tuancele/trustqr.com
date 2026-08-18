@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"io"
-	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-pdf/fpdf"
+	"github.com/srwiley/oksvg"
+	"github.com/srwiley/rasterx"
 )
 
 // LabelToken is one QR code to be placed on the print sheet / SVG output.
@@ -56,6 +60,38 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 	return GridSpec{Cols: cols, Rows: rows}, nil
 }
 
+// RasterizeSVG rasterizes svgBytes onto an opaque white widthPx x heightPx
+// canvas (stretching non-uniformly to fill the target exactly, matching how
+// the rest of the label pipeline treats an admin-set width_mm/height_mm as
+// authoritative over whatever aspect ratio the source file happens to have)
+// and returns the result PNG-encoded. Used to turn an SVG label template
+// into a template image RenderTiledPDF/RenderTiledGS1PDF can tile, since Go
+// has no in-process SVG->PDF vector converter — rendering at a high enough
+// pixel density keeps the tiled PDF sharp at normal print sizes.
+func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgBytes))
+	if err != nil {
+		return nil, fmt.Errorf("parse svg: %w", err)
+	}
+	if icon.ViewBox.W <= 0 || icon.ViewBox.H <= 0 {
+		return nil, fmt.Errorf("svg has no usable viewBox/width-height")
+	}
+	icon.SetTarget(0, 0, float64(widthPx), float64(heightPx))
+
+	img := image.NewRGBA(image.Rect(0, 0, widthPx, heightPx))
+	draw.Draw(img, img.Bounds(), image.White, image.Point{}, draw.Src)
+
+	scanner := rasterx.NewScannerGV(widthPx, heightPx, img, img.Bounds())
+	dasher := rasterx.NewDasher(widthPx, heightPx, scanner)
+	icon.Draw(dasher, 1.0)
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, fmt.Errorf("encode png: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 // RenderTiledPDF builds a print-ready PDF with one page per sheet, tiling the
 // template image with a barcode image composited at (qrXRatio,qrYRatio) with a
 // square side of (qrSizeRatio * labelW) — a fraction of labelW, matching the
@@ -67,7 +103,7 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 // The template image is registered once with fpdf and reused for every cell/page
 // (fpdf embeds identically-named images only once), so PDF size and memory stay
 // roughly proportional to the number of *distinct* barcode images, not the page count.
-func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -82,18 +118,12 @@ func RenderTiledPDF(templatePath, templateType string, sheetW, sheetH, labelW, l
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 
-	tplFile, err := os.Open(templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("open template: %w", err)
-	}
-	defer tplFile.Close()
-
 	imgType := strings.ToUpper(templateType)
 	if imgType == "JPG" {
 		imgType = "JPEG"
 	}
 	imgOpts := fpdf.ImageOptions{ImageType: imgType}
-	pdf.RegisterImageOptionsReader("tpl", imgOpts, tplFile)
+	pdf.RegisterImageOptionsReader("tpl", imgOpts, templateSrc)
 	if pdf.Err() {
 		return nil, fmt.Errorf("register template image: %v", pdf.Error())
 	}
@@ -259,7 +289,7 @@ func gs1SanitizeText(tr func(string) string, s string) string {
 // be unique per physical item — so gs1Fn resolves the barcode image and
 // field values independently for each token, the same way imageFn already
 // does for the per-unit QR.
-func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), gs1Fn func(LabelToken) (GS1FieldValues, []byte, error)) ([]byte, error) {
+func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), gs1Fn func(LabelToken) (GS1FieldValues, []byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -274,18 +304,12 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 
-	tplFile, err := os.Open(templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("open template: %w", err)
-	}
-	defer tplFile.Close()
-
 	imgType := strings.ToUpper(templateType)
 	if imgType == "JPG" {
 		imgType = "JPEG"
 	}
 	imgOpts := fpdf.ImageOptions{ImageType: imgType}
-	pdf.RegisterImageOptionsReader("tpl", imgOpts, tplFile)
+	pdf.RegisterImageOptionsReader("tpl", imgOpts, templateSrc)
 	if pdf.Err() {
 		return nil, fmt.Errorf("register template image: %v", pdf.Error())
 	}
@@ -365,10 +389,14 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 	return buf.Bytes(), nil
 }
 
-// gs1ExtraBoldOffsetMM is how far apart each faux-bold pass is drawn — large
-// enough to visibly thicken small print-label text, small enough not to
-// blur/double the glyph at normal viewing size.
-const gs1ExtraBoldOffsetMM = 0.12
+// gs1ExtraBoldStrokeWidthMM is the PDF stroke width used to thicken
+// WeightExtraBold glyphs via fill+stroke text rendering (PDF "Tr 2"). A
+// stroke traces the true glyph outline, so it thickens diagonals and curves
+// exactly as much as horizontals/verticals — unlike the old "poor man's
+// bold" trick of redrawing the glyph at 4 offset copies, which only spreads
+// ink along the horizontal/vertical axes and left visibly jagged, uneven
+// edges on diagonal strokes.
+const gs1ExtraBoldStrokeWidthMM = 0.15
 
 // gs1TextCapHeightRatio approximates Helvetica's cap height as a fraction of
 // its em size, used to convert the ratio-derived top-left anchor into the
@@ -398,31 +426,36 @@ func MeasureGS1Text(val string, sizeMM float64, weight string) (widthMM, capHeig
 // drawGS1Text draws val at baseline (tx,ty), optionally rotated 180 degrees
 // around its own visual center. fpdf's Helvetica only ships Regular and
 // Bold font programs (no true Extra Bold), so WeightExtraBold is faked by
-// redrawing the already-bold glyph a few times at tiny offsets — the
-// standard "poor man's bold" trick for text that has no bolder weight
-// available.
+// asking the PDF viewer to fill AND stroke the Bold glyph outline (PDF text
+// rendering mode "Tr 2", set via RawWriteStr since fpdf's Text() has no
+// parameter for it) — a uniformly thicker glyph with none of the directional
+// artifacts the old multi-copy-offset trick produced.
+//
+// Every draw is wrapped in TransformBegin/TransformEnd (PDF "q"/"Q") even
+// when not rotating, so the stroke width/color/join and text-render-mode
+// changes are scoped to this call and never leak into whatever is drawn
+// next (barcode lines, other text fields).
 func drawGS1Text(pdf *fpdf.Fpdf, val string, tx, ty, sizeMM float64, weight string, rotate180 bool) {
-	offsets := [][2]float64{{0, 0}}
-	if weight == WeightExtraBold {
-		offsets = [][2]float64{
-			{0, 0}, {gs1ExtraBoldOffsetMM, 0}, {-gs1ExtraBoldOffsetMM, 0},
-			{0, gs1ExtraBoldOffsetMM}, {0, -gs1ExtraBoldOffsetMM},
-		}
-	}
+	extraBold := weight == WeightExtraBold
+
+	pdf.TransformBegin()
 	if rotate180 {
 		cx := tx + pdf.GetStringWidth(val)/2
 		cy := ty - sizeMM*gs1TextCapHeightRatio/2
-		pdf.TransformBegin()
 		pdf.TransformRotate(180, cx, cy)
-		for _, o := range offsets {
-			pdf.Text(tx+o[0], ty+o[1], val)
-		}
-		pdf.TransformEnd()
-		return
 	}
-	for _, o := range offsets {
-		pdf.Text(tx+o[0], ty+o[1], val)
+	if extraBold {
+		pdf.SetLineWidth(gs1ExtraBoldStrokeWidthMM)
+		pdf.SetDrawColor(0, 0, 0)
+		pdf.SetLineJoinStyle("round")
+		pdf.SetLineCapStyle("round")
+		pdf.RawWriteStr("2 Tr\n")
 	}
+	pdf.Text(tx, ty, val)
+	if extraBold {
+		pdf.RawWriteStr("0 Tr\n")
+	}
+	pdf.TransformEnd()
 }
 
 // InjectQRIntoSVG returns a copy of svgBytes with a base64-embedded QR <image>
@@ -522,13 +555,24 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 		}
 		fontWeight := "normal"
 		fontStyle := ""
+		var strokeAttrs string
 		switch obj.Weight {
 		case WeightBold:
 			fontWeight = "bold"
 			fontStyle = "B"
 		case WeightExtraBold:
-			fontWeight = "900"
+			// fpdf's core Helvetica has no true Extra Bold, so
+			// drawGS1Text fakes it via PDF fill+stroke text rendering
+			// (Tr 2). Mirror that here with SVG's native stroke-on-text
+			// instead of font-weight:900 — a numeric CSS weight has no
+			// guaranteed Arial/Helvetica instance, so SVG consumers
+			// (Illustrator among them) synthesize it inconsistently. A
+			// real stroke traces the glyph outline uniformly (round
+			// joins/caps avoid jagged corners), rendering equivalently
+			// to the PDF export without any weight synthesis.
+			fontWeight = "bold"
 			fontStyle = "B"
+			strokeAttrs = fmt.Sprintf(` stroke="#000000" stroke-width="%.4f" stroke-linejoin="round" stroke-linecap="round" paint-order="stroke fill"`, gs1ExtraBoldStrokeWidthMM)
 		}
 
 		sizeMM := obj.SizeRatio * widthMM
@@ -548,9 +592,13 @@ func InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG []byte, qrXRatio, qrYRa
 			textTransform = fmt.Sprintf(` transform="rotate(180, %.4f, %.4f)"`, textWidthMM/2, baselineLocal/2)
 		}
 
-		fmt.Fprintf(&els, `<svg x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" viewBox="0 0 %.4f %.4f" preserveAspectRatio="none" overflow="visible"><text x="0" y="%.4f" font-size="%.4f" font-family="Arial, Helvetica, sans-serif" font-weight="%s"%s>%s</text></svg>`,
+		var textEls bytes.Buffer
+		fmt.Fprintf(&textEls, `<text x="0" y="%.4f" font-size="%.4f" font-family="Arial, Helvetica, sans-serif" font-weight="%s"%s>%s</text>`,
+			baselineLocal, boxHeightMM, fontWeight, strokeAttrs, escapeXMLText(val))
+
+		fmt.Fprintf(&els, `<svg x="%.4f%%" y="%.4f%%" width="%.4f%%" height="%.4f%%" viewBox="0 0 %.4f %.4f" preserveAspectRatio="none" overflow="visible"><g%s>%s</g></svg>`,
 			obj.XRatio*100, obj.YRatio*100, widthPct, heightPct, textWidthMM, boxHeightMM,
-			baselineLocal, boxHeightMM, fontWeight, textTransform, escapeXMLText(val))
+			textTransform, textEls.String())
 	}
 
 	out := make([]byte, 0, len(svgBytes)+els.Len())

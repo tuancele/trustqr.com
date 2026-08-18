@@ -177,8 +177,14 @@ func (h *LabelExportHandler) ExportLabelsPDF(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "no_tokens_in_range"})
 	}
 
+	tplFile, err := os.Open(tpl.FilePath)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "template_file_read"})
+	}
+	defer tplFile.Close()
+
 	pdfBytes, err := services.RenderTiledPDF(
-		tpl.FilePath, tpl.FileType,
+		tplFile, tpl.FileType,
 		sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 		tokens,
