@@ -16,9 +16,12 @@ import (
 )
 
 // LabelToken is one QR code to be placed on the print sheet / SVG output.
+// Serial is only populated for GS1 exports, where each physical unit needs
+// its own AI 21 Serial Number value (see RenderTiledGS1PDF).
 type LabelToken struct {
-	Code string
-	URL  string
+	Code   string
+	URL    string
+	Serial string
 }
 
 // GridSpec describes how many label cells fit on one sheet.
@@ -232,14 +235,13 @@ type GS1Layout struct {
 const mmToPt = 2.834645669
 
 // RenderTiledGS1PDF is RenderTiledPDF plus a barcode image and the
-// template's positioned text objects composited into every cell. Unlike the
-// per-unit QR, the barcode/text are the same for every physical copy in a
-// print run (a GS1 label's fields are defined once, at the label level), so
-// they're registered/drawn once and reused across cells the same way the
-// template image itself is. fieldValues supplies the resolved value for
-// each TextObjectConfig.Field; objects whose field has no value (empty
-// string or zero date) are skipped.
-func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, fieldValues GS1FieldValues, barcodePNG []byte, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+// template's positioned text objects composited into every cell. GTIN/Lot/
+// dates are the same for every physical copy in a print run (a GS1 batch's
+// fields are defined once, at the label level), but the Serial (AI 21) must
+// be unique per physical item — so gs1Fn resolves the barcode image and
+// field values independently for each token, the same way imageFn already
+// does for the per-unit QR.
+func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), gs1Fn func(LabelToken) (GS1FieldValues, []byte, error)) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -271,10 +273,6 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 	}
 
 	barcodeOpts := fpdf.ImageOptions{ImageType: "PNG"}
-	pdf.RegisterImageOptionsReader("barcode", barcodeOpts, bytes.NewReader(barcodePNG))
-	if pdf.Err() {
-		return nil, fmt.Errorf("register barcode image: %v", pdf.Error())
-	}
 
 	qrSide := qrSizeRatio * labelW
 	qrOffsetX := qrXRatio * labelW
@@ -300,7 +298,14 @@ func RenderTiledGS1PDF(templatePath, templateType string, sheetW, sheetH, labelW
 		cellY := margin + float64(row)*(labelH+gutter)
 
 		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
-		pdf.ImageOptions("barcode", cellX+barcodeX, cellY+barcodeY, barcodeW, barcodeH, false, barcodeOpts, 0, "")
+
+		fieldValues, barcodePNG, err := gs1Fn(tok)
+		if err != nil {
+			return nil, fmt.Errorf("resolve gs1 fields for %s: %w", tok.Code, err)
+		}
+		barcodeName := "barcode_" + tok.Code
+		pdf.RegisterImageOptionsReader(barcodeName, barcodeOpts, bytes.NewReader(barcodePNG))
+		pdf.ImageOptions(barcodeName, cellX+barcodeX, cellY+barcodeY, barcodeW, barcodeH, false, barcodeOpts, 0, "")
 
 		for _, obj := range layout.TextObjects {
 			val := fieldValues.resolve(obj)

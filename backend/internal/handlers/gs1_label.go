@@ -312,6 +312,7 @@ func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
 type gs1UnitRow struct {
 	ID             int64      `json:"id"`
 	SerialNo       int        `json:"serial_no"`
+	Serial         *string    `json:"serial"`
 	VerifyCode     string     `json:"verify_code"`
 	ScanCount      int        `json:"scan_count"`
 	FirstScannedAt *time.Time `json:"first_scanned_at"`
@@ -346,7 +347,7 @@ func (h *GS1LabelHandler) ListUnits(c *fiber.Ctx) error {
 	}
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT id, serial_no, verify_code, scan_count, first_scanned_at, first_scan_city, status, created_at
+		SELECT id, serial_no, serial, verify_code, scan_count, first_scanned_at, first_scan_city, status, created_at
 		FROM gs1_label_units WHERE label_id = $1
 		ORDER BY serial_no DESC LIMIT $2 OFFSET $3
 	`, id, pageSize, (page-1)*pageSize)
@@ -358,7 +359,7 @@ func (h *GS1LabelHandler) ListUnits(c *fiber.Ctx) error {
 	items := []gs1UnitRow{}
 	for rows.Next() {
 		var u gs1UnitRow
-		if err := rows.Scan(&u.ID, &u.SerialNo, &u.VerifyCode, &u.ScanCount, &u.FirstScannedAt, &u.FirstScanCity, &u.Status, &u.CreatedAt); err == nil {
+		if err := rows.Scan(&u.ID, &u.SerialNo, &u.Serial, &u.VerifyCode, &u.ScanCount, &u.FirstScannedAt, &u.FirstScanCity, &u.Status, &u.CreatedAt); err == nil {
 			items = append(items, u)
 		}
 	}

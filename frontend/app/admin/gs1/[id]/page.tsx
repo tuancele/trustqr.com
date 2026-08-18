@@ -306,6 +306,7 @@ function EField({ label, required, children }: { label: string; required?: boole
 interface GS1Unit {
   id: number;
   serial_no: number;
+  serial: string | null;
   verify_code: string;
   scan_count: number;
   first_scanned_at: string | null;
@@ -353,6 +354,7 @@ function UnitsTab({ labelId }: { labelId: number }) {
               <tr className="bg-gray-50 text-left text-xs text-gray-600 uppercase">
                 <th className="px-3 py-2">#</th>
                 <th className="px-3 py-2">Mã xác minh</th>
+                <th className="px-3 py-2">Serial GS1</th>
                 <th className="px-3 py-2">Trạng thái</th>
                 <th className="px-3 py-2 text-right">Số lần quét</th>
                 <th className="px-3 py-2">Quét lần đầu</th>
@@ -365,6 +367,7 @@ function UnitsTab({ labelId }: { labelId: number }) {
                 <tr key={u.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono text-xs text-gray-500">{u.serial_no}</td>
                   <td className="px-3 py-2 font-mono text-xs text-gov-700">{u.verify_code}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-gray-700">{u.serial || '—'}</td>
                   <td className="px-3 py-2">
                     {u.status === 'active' ? (
                       <span className="inline-flex items-center gap-1 text-emerald-700 text-xs">

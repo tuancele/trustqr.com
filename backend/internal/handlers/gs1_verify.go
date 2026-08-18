@@ -81,6 +81,7 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	var (
 		unitID          int64
 		labelID         int64
+		unitSerial      *string
 		gtin            string
 		manufactureDate time.Time
 		expiryDate      *time.Time
@@ -108,8 +109,8 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		    first_scan_city  = COALESCE(first_scan_city, $2),
 		    first_scan_ip    = COALESCE(first_scan_ip, $3::inet)
 		WHERE verify_code = $1
-		RETURNING id, label_id, scan_count, first_scanned_at, COALESCE(first_scan_city,''), status
-	`, req.Code, city, nullIfEmpty(ip)).Scan(&unitID, &labelID, &scanCount, &firstScannedAt, &firstScanCity, &status)
+		RETURNING id, label_id, serial, scan_count, first_scanned_at, COALESCE(first_scan_city,''), status
+	`, req.Code, city, nullIfEmpty(ip)).Scan(&unitID, &labelID, &unitSerial, &scanCount, &firstScannedAt, &firstScanCity, &status)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -153,6 +154,12 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 
 	gs1Limit := getScanLimit(ctx, h.DB, "gs1")
 	locked := gs1Limit != nil && scanCount > *gs1Limit
+
+	// Units created before per-unit serials existed have unitSerial == nil;
+	// fall back to the label's shared serial for those older prints.
+	if unitSerial != nil && *unitSerial != "" {
+		serial = *unitSerial
+	}
 
 	resp := gs1VerifyResp{
 		Valid:           true,

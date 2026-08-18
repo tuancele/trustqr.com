@@ -108,8 +108,11 @@ func gs1FieldValues(f gs1ExportFields) services.GS1FieldValues {
 // createGS1Units generates `quantity` brand-new physical-sticker rows for a
 // label — each gets its own unique verify_code, mirroring how CreateBatch
 // bulk-inserts unique qr_tokens. Every export call is treated as its own
-// print run, so codes are never reused or topped-up across exports.
-func (h *GS1LabelExportHandler) createGS1Units(ctx context.Context, labelID int64, quantity int) ([]services.LabelToken, error) {
+// print run, so codes are never reused or topped-up across exports. Each
+// unit also gets its own GS1 Serial Number (AI 21, serialPrefix + 7 random
+// chars) — the standard requires a unique serial per physical item, unlike
+// GTIN/Lot which are shared for the whole batch.
+func (h *GS1LabelExportHandler) createGS1Units(ctx context.Context, labelID int64, quantity int, serialPrefix string) ([]services.LabelToken, error) {
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -128,17 +131,23 @@ func (h *GS1LabelExportHandler) createGS1Units(ctx context.Context, labelID int6
 		if err != nil {
 			return nil, err
 		}
-		serial := maxSerial + i + 1
-		tokens[i] = services.LabelToken{
-			Code: code,
-			URL:  fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, code),
+		suffix, err := generateSerialSuffix(7)
+		if err != nil {
+			return nil, err
 		}
-		rows[i] = []any{labelID, code, serial, "active"}
+		unitSerial := serialPrefix + suffix
+		serialNo := maxSerial + i + 1
+		tokens[i] = services.LabelToken{
+			Code:   code,
+			URL:    fmt.Sprintf("%s/auth/%s", h.PublicBaseURL, code),
+			Serial: unitSerial,
+		}
+		rows[i] = []any{labelID, code, serialNo, unitSerial, "active"}
 	}
 
 	if _, err := tx.CopyFrom(ctx,
 		pgx.Identifier{"gs1_label_units"},
-		[]string{"label_id", "verify_code", "serial_no", "status"},
+		[]string{"label_id", "verify_code", "serial_no", "serial", "status"},
 		pgx.CopyFromRows(rows),
 	); err != nil {
 		return nil, err
@@ -227,7 +236,11 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 
-	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
+	serialPrefix := fields.Serial
+	if len(serialPrefix) > 3 {
+		serialPrefix = serialPrefix[:3]
+	}
+	tokens, err := h.createGS1Units(ctx, id, b.Quantity, serialPrefix)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
@@ -236,18 +249,23 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 
 	var pdfBytes []byte
 	if tpl.IsGS1 {
-		barcodePNG, genErr := services.GenerateBarcodePNG(fields.Serial,
-			mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
-			mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
-		if genErr != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "barcode_gen_failed", "detail": genErr.Error()})
+		gs1Fn := func(tok services.LabelToken) (services.GS1FieldValues, []byte, error) {
+			fv := gs1FieldValues(fields)
+			fv.Fields["serial"] = tok.Serial
+			barcodePNG, genErr := services.GenerateBarcodePNG(tok.Serial,
+				mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
+				mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
+			if genErr != nil {
+				return fv, nil, genErr
+			}
+			return fv, barcodePNG, nil
 		}
 		pdfBytes, err = services.RenderTiledGS1PDF(
 			tpl.FilePath, tpl.FileType,
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
-			tpl.GS1Layout, gs1FieldValues(fields), barcodePNG,
-			tokens, imageFn,
+			tpl.GS1Layout,
+			tokens, imageFn, gs1Fn,
 		)
 	} else {
 		pdfBytes, err = services.RenderTiledPDF(
@@ -324,19 +342,13 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 
-	tokens, err := h.createGS1Units(ctx, id, b.Quantity)
+	serialPrefix := fields.Serial
+	if len(serialPrefix) > 3 {
+		serialPrefix = serialPrefix[:3]
+	}
+	tokens, err := h.createGS1Units(ctx, id, b.Quantity, serialPrefix)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
-	}
-
-	var barcodePNG []byte
-	if tpl.IsGS1 {
-		barcodePNG, err = services.GenerateBarcodePNG(fields.Serial,
-			mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
-			mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "barcode_gen_failed", "detail": err.Error()})
-		}
 	}
 
 	var buf bytes.Buffer
@@ -353,8 +365,16 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 		}
 		var out []byte
 		if tpl.IsGS1 {
+			barcodePNG, genErr := services.GenerateBarcodePNG(tok.Serial,
+				mmToPxAtDPI(tpl.GS1Layout.BarcodeWRatio*tpl.WidthMM, gs1BarcodeDPI),
+				mmToPxAtDPI(tpl.GS1Layout.BarcodeHRatio*tpl.HeightMM, gs1BarcodeDPI))
+			if genErr != nil {
+				return c.Status(500).JSON(fiber.Map{"error": "barcode_gen_failed", "detail": genErr.Error()})
+			}
+			fv := gs1FieldValues(fields)
+			fv.Fields["serial"] = tok.Serial
 			out, err = services.InjectGS1ObjectsIntoSVG(svgBytes, qrPNG, barcodePNG,
-				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, gs1FieldValues(fields), tpl.WidthMM, tpl.HeightMM)
+				tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.GS1Layout, fv, tpl.WidthMM, tpl.HeightMM)
 		} else {
 			out, err = services.InjectQRIntoSVG(svgBytes, qrPNG, tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio, tpl.WidthMM, tpl.HeightMM)
 		}
@@ -367,7 +387,7 @@ func (h *GS1LabelExportHandler) ExportSVGZip(c *fiber.Ctx) error {
 			continue
 		}
 		fw.Write(out)
-		cw.Write([]string{filename, tok.Code, fields.GTIN, fields.Lot, fields.Serial})
+		cw.Write([]string{filename, tok.Code, fields.GTIN, fields.Lot, tok.Serial})
 	}
 	cw.Flush()
 
