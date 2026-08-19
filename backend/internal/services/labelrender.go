@@ -69,6 +69,19 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 // raster/PDF, hiding the template's true silhouette.
 var rasterCanvasGray = color.RGBA{R: 200, G: 200, B: 200, A: 255}
 
+// addGrayPage adds a new sheetW x sheetH page and fills it with
+// rasterCanvasGray before any label images are placed, so the sheet's own
+// margin/gutter area (outside every placed label image) matches the gray
+// RasterizeSVG now paints behind each label's own template — otherwise the
+// page background would stay white while the dead space inside each label
+// image is gray, which defeats the point of using gray to make a label's
+// true silhouette (and any white die-cut shapes on it) stand out.
+func addGrayPage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH float64) {
+	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+	pdf.SetFillColor(int(rasterCanvasGray.R), int(rasterCanvasGray.G), int(rasterCanvasGray.B))
+	pdf.Rect(0, 0, sheetW, sheetH, "F")
+}
+
 // RasterizeSVG rasterizes svgBytes onto an opaque gray (see rasterCanvasGray)
 // widthPx x heightPx canvas (stretching non-uniformly to fill the target
 // exactly, matching how the rest of the label pipeline treats an admin-set
@@ -144,11 +157,11 @@ func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, 
 	qrOpts := fpdf.ImageOptions{ImageType: "PNG"}
 
 	perPage := grid.Cols * grid.Rows
-	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+	addGrayPage(pdf, orientation, sheetW, sheetH)
 
 	for i, tok := range tokens {
 		if i > 0 && i%perPage == 0 {
-			pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+			addGrayPage(pdf, orientation, sheetW, sheetH)
 		}
 		posInPage := i % perPage
 		col := posInPage % grid.Cols
@@ -338,11 +351,11 @@ func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheet
 	barcodeH := layout.BarcodeHRatio * labelH
 
 	perPage := grid.Cols * grid.Rows
-	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+	addGrayPage(pdf, orientation, sheetW, sheetH)
 
 	for i, tok := range tokens {
 		if i > 0 && i%perPage == 0 {
-			pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
+			addGrayPage(pdf, orientation, sheetW, sheetH)
 		}
 		posInPage := i % perPage
 		col := posInPage % grid.Cols
