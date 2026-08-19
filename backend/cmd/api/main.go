@@ -312,10 +312,12 @@ func main() {
 	protected.Get("/templates", templates.List)
 	protected.Get("/templates/:id", templates.Get)
 	protected.Patch("/templates/:id", templates.Update)
+	protected.Put("/templates/:id", templates.UpdateFull)
 	protected.Delete("/templates/:id", templates.Delete)
 	protected.Get("/templates/:id/preview", templates.Preview)
 	protected.Get("/templates/:id/barcode-preview", templates.BarcodePreview)
 	protected.Get("/templates/:id/text-metrics", templates.TextMetrics)
+	protected.Post("/templates/:id/cutline", templates.UploadCutline)
 
 	// Saved GS1 object-position layouts (reuse a finished arrangement on another template)
 	protected.Get("/label-layout-presets", labelLayoutPresets.List)

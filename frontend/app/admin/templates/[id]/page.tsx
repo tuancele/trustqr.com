@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2, BookmarkPlus, FolderDown } from 'lucide-react';
-import { api, fetchBlobUrl } from '@/lib/adminApi';
+import { ArrowLeft, Save, QrCode, Loader2, Plus, Trash2, BookmarkPlus, FolderDown, Scissors } from 'lucide-react';
+import { api, fetchBlobUrl, uploadForm } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert } from '@/components/ui';
 
 type TextWeight = 'regular' | 'bold' | 'extrabold';
@@ -35,6 +35,7 @@ interface Template {
   barcode_w_ratio: number;
   barcode_h_ratio: number;
   text_objects: TextObjectAPI[];
+  has_cutline: boolean;
 }
 
 interface LayoutPreset {
@@ -133,6 +134,11 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
   const [presetPick, setPresetPick] = useState<number | ''>('');
   const [presetSaving, setPresetSaving] = useState(false);
   const [presetMsg, setPresetMsg] = useState<string | null>(null);
+
+  const [cutlineFile, setCutlineFile] = useState<File | null>(null);
+  const [cutlineUploading, setCutlineUploading] = useState(false);
+  const [cutlineMsg, setCutlineMsg] = useState<string | null>(null);
+  const cutlineInputRef = useRef<HTMLInputElement>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidthPx, setContainerWidthPx] = useState(0);
@@ -364,6 +370,24 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
     setPresetMsg(`Đã áp dụng mẫu "${p.name}". Nhớ bấm "Lưu vị trí" để lưu lại.`);
   }
 
+  async function uploadCutline() {
+    if (!tpl || !cutlineFile) return;
+    setCutlineUploading(true);
+    setCutlineMsg(null);
+    const fd = new FormData();
+    fd.append('cutline_file', cutlineFile);
+    const r = await uploadForm(`/api/v1/admin/templates/${tpl.id}/cutline`, fd);
+    setCutlineUploading(false);
+    if (r.ok) {
+      setTpl((t) => (t ? { ...t, has_cutline: true } : t));
+      setCutlineFile(null);
+      if (cutlineInputRef.current) cutlineInputRef.current.value = '';
+      setCutlineMsg('Đã tải lên file khuôn cắt.');
+    } else {
+      setCutlineMsg(r.error || 'Tải lên thất bại');
+    }
+  }
+
   async function deletePreset(id: number) {
     const r = await api(`/api/v1/admin/label-layout-presets/${id}`, { method: 'DELETE' });
     if (r.ok) {
@@ -549,6 +573,33 @@ export default function TemplatePositionPage({ params }: { params: { id: string 
               {presetMsg && <p className="text-xs text-gray-500">{presetMsg}</p>}
             </div>
           )}
+
+          <div className="card p-4 space-y-3">
+            <h3 className="font-semibold text-sm text-gray-700 flex items-center gap-1.5">
+              <Scissors className="w-4 h-4 text-gray-400" /> Khuôn cắt (cutline)
+            </h3>
+            <p className="text-xs text-gray-500">
+              {tpl.has_cutline
+                ? 'Mẫu tem này đã có file khuôn cắt. Tải lên file mới để thay thế.'
+                : 'Chưa có file khuôn cắt. Cần tải lên để bật tuỳ chọn "Xuất trang cutline" khi in.'}
+            </p>
+            <input
+              ref={cutlineInputRef}
+              type="file" accept=".svg"
+              onChange={(e) => setCutlineFile(e.target.files?.[0] || null)}
+              className="form-input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gov-50 file:text-gov-700 file:text-xs w-full"
+            />
+            <button
+              type="button"
+              onClick={uploadCutline}
+              disabled={cutlineUploading || !cutlineFile}
+              className="btn-secondary"
+            >
+              {cutlineUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scissors className="w-4 h-4" />}
+              {tpl.has_cutline ? 'Thay thế' : 'Tải lên'}
+            </button>
+            {cutlineMsg && <p className="text-xs text-gray-500">{cutlineMsg}</p>}
+          </div>
 
           <RatioPanel title="QR" color="gov">
             <NumField label="Vị trí X (%)" value={qr.x} max={1 - qr.size}

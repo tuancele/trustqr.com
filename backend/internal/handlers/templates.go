@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -48,11 +49,13 @@ type templateRow struct {
 	BarcodeWRatio float64                     `json:"barcode_w_ratio"`
 	BarcodeHRatio float64                     `json:"barcode_h_ratio"`
 	TextObjects   []services.TextObjectConfig `json:"text_objects"`
+	HasCutline    bool                        `json:"has_cutline"`
 	CreatedAt     time.Time                   `json:"created_at"`
 }
 
 const templateColumns = `id, name, width_mm, height_mm, file_type, qr_x_ratio, qr_y_ratio, qr_size_ratio,
-	is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects, created_at`
+	is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects,
+	(cutline_file_path IS NOT NULL) AS has_cutline, created_at`
 
 func scanTemplateRow(row pgx.Row) (templateRow, error) {
 	var r templateRow
@@ -60,7 +63,7 @@ func scanTemplateRow(row pgx.Row) (templateRow, error) {
 	err := row.Scan(&r.ID, &r.Name, &r.WidthMM, &r.HeightMM, &r.FileType,
 		&r.QRXRatio, &r.QRYRatio, &r.QRSizeRatio, &r.IsGS1,
 		&r.BarcodeXRatio, &r.BarcodeYRatio, &r.BarcodeWRatio, &r.BarcodeHRatio,
-		&textObjectsRaw, &r.CreatedAt)
+		&textObjectsRaw, &r.HasCutline, &r.CreatedAt)
 	if err != nil {
 		return r, err
 	}
@@ -162,6 +165,114 @@ func (h *TemplateHandler) Get(c *fiber.Ctx) error {
 	return c.JSON(r)
 }
 
+// storeCutlineFile validates an uploaded die-line SVG (must be an SVG,
+// sanitized the same way as a regular template, and must parse as a usable
+// SVG with a real viewBox — the same check RasterizeSVG itself would fail
+// on at export time) and writes it to StorageDir, returning the stored path
+// for the caller to persist on the template row.
+func (h *TemplateHandler) storeCutlineFile(fh *multipart.FileHeader, widthMM, heightMM float64) (string, error) {
+	if fh.Size <= 0 || fh.Size > maxTemplateUploadBytes {
+		return "", fmt.Errorf("cutline_file_too_large")
+	}
+	if strings.ToLower(filepath.Ext(fh.Filename)) != ".svg" {
+		return "", fmt.Errorf("cutline_must_be_svg")
+	}
+	src, err := fh.Open()
+	if err != nil {
+		return "", fmt.Errorf("cutline_file_open")
+	}
+	defer src.Close()
+	data, err := io.ReadAll(io.LimitReader(src, maxTemplateUploadBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("cutline_file_read")
+	}
+	if len(data) > maxTemplateUploadBytes {
+		return "", fmt.Errorf("cutline_file_too_large")
+	}
+	sanitized, err := services.SanitizeSVG(data)
+	if err != nil {
+		return "", fmt.Errorf("cutline_invalid_svg")
+	}
+	if err := services.ValidateCutlineSVG(sanitized); err != nil {
+		return "", fmt.Errorf("cutline_invalid_svg: %w", err)
+	}
+
+	if err := os.MkdirAll(h.StorageDir, 0755); err != nil {
+		return "", fmt.Errorf("storage_dir")
+	}
+	storedName := uuid.NewString() + "_cutline.svg"
+	fullPath := filepath.Join(h.StorageDir, storedName)
+	if err := os.WriteFile(fullPath, sanitized, 0644); err != nil {
+		return "", fmt.Errorf("cutline_file_write")
+	}
+	return fullPath, nil
+}
+
+// storeDesignFile validates an uploaded PNG/JPG/SVG design file (size cap,
+// format sniffing, CMYK JPEG rejection, SVG sanitization) and writes it to
+// StorageDir, returning the stored path and detected file type.
+func (h *TemplateHandler) storeDesignFile(fh *multipart.FileHeader) (string, string, error) {
+	if fh.Size <= 0 || fh.Size > maxTemplateUploadBytes {
+		return "", "", fmt.Errorf("file_too_large")
+	}
+
+	var fileType string
+	switch strings.ToLower(filepath.Ext(fh.Filename)) {
+	case ".png":
+		fileType = "png"
+	case ".jpg", ".jpeg":
+		fileType = "jpg"
+	case ".svg":
+		fileType = "svg"
+	default:
+		return "", "", fmt.Errorf("unsupported_file_type")
+	}
+
+	src, err := fh.Open()
+	if err != nil {
+		return "", "", fmt.Errorf("file_open")
+	}
+	defer src.Close()
+	data, err := io.ReadAll(io.LimitReader(src, maxTemplateUploadBytes+1))
+	if err != nil {
+		return "", "", fmt.Errorf("file_read")
+	}
+	if len(data) > maxTemplateUploadBytes {
+		return "", "", fmt.Errorf("file_too_large")
+	}
+
+	switch fileType {
+	case "png":
+		if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
+			return "", "", fmt.Errorf("invalid_png")
+		}
+	case "jpg":
+		cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return "", "", fmt.Errorf("invalid_jpeg")
+		}
+		if cfg.ColorModel == color.CMYKModel {
+			return "", "", fmt.Errorf("cmyk_jpeg_unsupported")
+		}
+	case "svg":
+		sanitized, err := services.SanitizeSVG(data)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid_svg")
+		}
+		data = sanitized
+	}
+
+	if err := os.MkdirAll(h.StorageDir, 0755); err != nil {
+		return "", "", fmt.Errorf("storage_dir")
+	}
+	storedName := uuid.NewString() + "." + fileType
+	fullPath := filepath.Join(h.StorageDir, storedName)
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		return "", "", fmt.Errorf("file_write")
+	}
+	return fullPath, fileType, nil
+}
+
 // -------- ADMIN: Upload --------
 
 func (h *TemplateHandler) Create(c *fiber.Ctx) error {
@@ -178,63 +289,9 @@ func (h *TemplateHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "file_required"})
 	}
-	if fh.Size <= 0 || fh.Size > maxTemplateUploadBytes {
-		return c.Status(400).JSON(fiber.Map{"error": "file_too_large"})
-	}
-
-	var fileType string
-	switch strings.ToLower(filepath.Ext(fh.Filename)) {
-	case ".png":
-		fileType = "png"
-	case ".jpg", ".jpeg":
-		fileType = "jpg"
-	case ".svg":
-		fileType = "svg"
-	default:
-		return c.Status(400).JSON(fiber.Map{"error": "unsupported_file_type"})
-	}
-
-	src, err := fh.Open()
+	fullPath, fileType, err := h.storeDesignFile(fh)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "file_open"})
-	}
-	defer src.Close()
-	data, err := io.ReadAll(io.LimitReader(src, maxTemplateUploadBytes+1))
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "file_read"})
-	}
-	if len(data) > maxTemplateUploadBytes {
-		return c.Status(400).JSON(fiber.Map{"error": "file_too_large"})
-	}
-
-	switch fileType {
-	case "png":
-		if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid_png"})
-		}
-	case "jpg":
-		cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid_jpeg"})
-		}
-		if cfg.ColorModel == color.CMYKModel {
-			return c.Status(400).JSON(fiber.Map{"error": "cmyk_jpeg_unsupported"})
-		}
-	case "svg":
-		sanitized, err := services.SanitizeSVG(data)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid_svg"})
-		}
-		data = sanitized
-	}
-
-	if err := os.MkdirAll(h.StorageDir, 0755); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "storage_dir"})
-	}
-	storedName := uuid.NewString() + "." + fileType
-	fullPath := filepath.Join(h.StorageDir, storedName)
-	if err := os.WriteFile(fullPath, data, 0644); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "file_write"})
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	var textObjects []services.TextObjectConfig
@@ -248,18 +305,30 @@ func (h *TemplateHandler) Create(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "text_objects_encode"})
 	}
 
+	var cutlineFilePath string
+	if cutlineFH, cerr := c.FormFile("cutline_file"); cerr == nil {
+		cutlineFilePath, err = h.storeCutlineFile(cutlineFH, widthMM, heightMM)
+		if err != nil {
+			_ = os.Remove(fullPath)
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+
 	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
 	var id int64
 	err = h.DB.QueryRow(ctx, `
-		INSERT INTO label_templates (name, width_mm, height_mm, file_type, file_path, is_gs1, text_objects, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO label_templates (name, width_mm, height_mm, file_type, file_path, is_gs1, text_objects, cutline_file_path, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING id
-	`, name, widthMM, heightMM, fileType, fullPath, isGS1, textObjectsJSON, nullIfZeroInt64(adminID)).Scan(&id)
+	`, name, widthMM, heightMM, fileType, fullPath, isGS1, textObjectsJSON, nullIfEmptyString(cutlineFilePath), nullIfZeroInt64(adminID)).Scan(&id)
 	if err != nil {
 		_ = os.Remove(fullPath)
+		if cutlineFilePath != "" {
+			_ = os.Remove(cutlineFilePath)
+		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 
@@ -272,6 +341,8 @@ func (h *TemplateHandler) Create(c *fiber.Ctx) error {
 
 type templatePatchBody struct {
 	Name          *string                      `json:"name"`
+	WidthMM       *float64                     `json:"width_mm"`
+	HeightMM      *float64                     `json:"height_mm"`
 	QRXRatio      *float64                     `json:"qr_x_ratio"`
 	QRYRatio      *float64                     `json:"qr_y_ratio"`
 	QRSizeRatio   *float64                     `json:"qr_size_ratio"`
@@ -302,6 +373,12 @@ func (h *TemplateHandler) Update(c *fiber.Ctx) error {
 	var b templatePatchBody
 	if err := c.BodyParser(&b); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
+	}
+	if b.WidthMM != nil && *b.WidthMM <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "width_mm_invalid"})
+	}
+	if b.HeightMM != nil && *b.HeightMM <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "height_mm_invalid"})
 	}
 	if !ratio01(b.QRXRatio, false) {
 		return c.Status(400).JSON(fiber.Map{"error": "qr_x_ratio_out_of_range"})
@@ -334,17 +411,19 @@ func (h *TemplateHandler) Update(c *fiber.Ctx) error {
 	tag, err := h.DB.Exec(ctx, `
 		UPDATE label_templates SET
 			name = COALESCE($1, name),
-			qr_x_ratio = COALESCE($2, qr_x_ratio),
-			qr_y_ratio = COALESCE($3, qr_y_ratio),
-			qr_size_ratio = COALESCE($4, qr_size_ratio),
-			is_gs1 = COALESCE($5, is_gs1),
-			barcode_x_ratio = COALESCE($6, barcode_x_ratio),
-			barcode_y_ratio = COALESCE($7, barcode_y_ratio),
-			barcode_w_ratio = COALESCE($8, barcode_w_ratio),
-			barcode_h_ratio = COALESCE($9, barcode_h_ratio),
-			text_objects = COALESCE($10, text_objects)
-		WHERE id = $11
-	`, b.Name, b.QRXRatio, b.QRYRatio, b.QRSizeRatio, b.IsGS1,
+			width_mm = COALESCE($2, width_mm),
+			height_mm = COALESCE($3, height_mm),
+			qr_x_ratio = COALESCE($4, qr_x_ratio),
+			qr_y_ratio = COALESCE($5, qr_y_ratio),
+			qr_size_ratio = COALESCE($6, qr_size_ratio),
+			is_gs1 = COALESCE($7, is_gs1),
+			barcode_x_ratio = COALESCE($8, barcode_x_ratio),
+			barcode_y_ratio = COALESCE($9, barcode_y_ratio),
+			barcode_w_ratio = COALESCE($10, barcode_w_ratio),
+			barcode_h_ratio = COALESCE($11, barcode_h_ratio),
+			text_objects = COALESCE($12, text_objects)
+		WHERE id = $13
+	`, b.Name, b.WidthMM, b.HeightMM, b.QRXRatio, b.QRYRatio, b.QRSizeRatio, b.IsGS1,
 		b.BarcodeXRatio, b.BarcodeYRatio, b.BarcodeWRatio, b.BarcodeHRatio,
 		textObjectsJSON, id)
 	if err != nil {
@@ -360,6 +439,149 @@ func (h *TemplateHandler) Update(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true})
 }
 
+// -------- ADMIN: Full update (name/size/is_gs1 + optionally replace design/cutline files) --------
+
+// UpdateFull mirrors the Create upload's validation but edits a template in
+// place: name, width_mm, height_mm and is_gs1 are always overwritten, and
+// the design file and/or cutline file are only replaced if a new one is
+// attached. Position ratios and text_objects are left untouched — those stay
+// under the position editor's Update. New files are validated and written
+// before any old file is removed, so a bad replacement never leaves the
+// template broken.
+func (h *TemplateHandler) UpdateFull(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+
+	name := strings.TrimSpace(c.FormValue("name"))
+	widthMM, errW := strconv.ParseFloat(c.FormValue("width_mm"), 64)
+	heightMM, errH := strconv.ParseFloat(c.FormValue("height_mm"), 64)
+	if name == "" || errW != nil || errH != nil || widthMM <= 0 || heightMM <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_fields"})
+	}
+	isGS1 := c.FormValue("is_gs1") == "true" || c.FormValue("is_gs1") == "on"
+
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	var oldFilePath, oldFileType string
+	var oldCutlinePath *string
+	err = h.DB.QueryRow(ctx, `SELECT file_path, file_type, cutline_file_path FROM label_templates WHERE id = $1`, id).
+		Scan(&oldFilePath, &oldFileType, &oldCutlinePath)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	var newFilePath, newFileType string
+	if fh, ferr := c.FormFile("file"); ferr == nil {
+		newFilePath, newFileType, err = h.storeDesignFile(fh)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+
+	var newCutlinePath string
+	if cutlineFH, cerr := c.FormFile("cutline_file"); cerr == nil {
+		newCutlinePath, err = h.storeCutlineFile(cutlineFH, widthMM, heightMM)
+		if err != nil {
+			if newFilePath != "" {
+				_ = os.Remove(newFilePath)
+			}
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+
+	filePathToSet, fileTypeToSet := oldFilePath, oldFileType
+	if newFilePath != "" {
+		filePathToSet, fileTypeToSet = newFilePath, newFileType
+	}
+	cutlinePathToSet := oldCutlinePath
+	if newCutlinePath != "" {
+		cutlinePathToSet = &newCutlinePath
+	}
+
+	_, err = h.DB.Exec(ctx, `
+		UPDATE label_templates SET
+			name = $1, width_mm = $2, height_mm = $3, is_gs1 = $4,
+			file_path = $5, file_type = $6, cutline_file_path = $7
+		WHERE id = $8
+	`, name, widthMM, heightMM, isGS1, filePathToSet, fileTypeToSet, cutlinePathToSet, id)
+	if err != nil {
+		if newFilePath != "" {
+			_ = os.Remove(newFilePath)
+		}
+		if newCutlinePath != "" {
+			_ = os.Remove(newCutlinePath)
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	if newFilePath != "" && oldFilePath != "" {
+		_ = os.Remove(oldFilePath)
+	}
+	if newCutlinePath != "" && oldCutlinePath != nil && *oldCutlinePath != "" {
+		_ = os.Remove(*oldCutlinePath)
+	}
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "label_template.update_full", "label_template", strconv.FormatInt(id, 10),
+		fiber.Map{"name": name}, middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"success": true})
+}
+
+// -------- ADMIN: Upload/replace cutline file --------
+
+// UploadCutline sets (or replaces) the die-line SVG used to generate a
+// dedicated cutline page at print export time (see services.PDFExtras). The
+// new file is validated/stored before the old one is removed, so a bad
+// upload never leaves the template without its previous working cutline.
+func (h *TemplateHandler) UploadCutline(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	var widthMM, heightMM float64
+	var oldCutlinePath *string
+	err = h.DB.QueryRow(ctx, `SELECT width_mm, height_mm, cutline_file_path FROM label_templates WHERE id = $1`, id).
+		Scan(&widthMM, &heightMM, &oldCutlinePath)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	fh, err := c.FormFile("cutline_file")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "cutline_file_required"})
+	}
+	newPath, err := h.storeCutlineFile(fh, widthMM, heightMM)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if _, err := h.DB.Exec(ctx, `UPDATE label_templates SET cutline_file_path = $1 WHERE id = $2`, newPath, id); err != nil {
+		_ = os.Remove(newPath)
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if oldCutlinePath != nil && *oldCutlinePath != "" {
+		_ = os.Remove(*oldCutlinePath)
+	}
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "label_template.cutline_upload", "label_template", strconv.FormatInt(id, 10),
+		fiber.Map{}, middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"success": true})
+}
+
 // -------- ADMIN: Delete --------
 
 func (h *TemplateHandler) Delete(c *fiber.Ctx) error {
@@ -371,7 +593,9 @@ func (h *TemplateHandler) Delete(c *fiber.Ctx) error {
 	defer cancel()
 
 	var filePath string
-	err = h.DB.QueryRow(ctx, `DELETE FROM label_templates WHERE id = $1 RETURNING file_path`, id).Scan(&filePath)
+	var cutlineFilePath *string
+	err = h.DB.QueryRow(ctx, `DELETE FROM label_templates WHERE id = $1 RETURNING file_path, cutline_file_path`, id).
+		Scan(&filePath, &cutlineFilePath)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
@@ -379,6 +603,9 @@ func (h *TemplateHandler) Delete(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
 	_ = os.Remove(filePath)
+	if cutlineFilePath != nil && *cutlineFilePath != "" {
+		_ = os.Remove(*cutlineFilePath)
+	}
 
 	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
 	h.Audit.Log(adminID, "label_template.delete", "label_template", strconv.FormatInt(id, 10), nil,

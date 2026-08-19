@@ -61,37 +61,50 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 	return GridSpec{Cols: cols, Rows: rows}, nil
 }
 
-// rasterCanvasGray is the fill color RasterizeSVG paints behind the parsed
-// SVG before drawing it. It is deliberately not white: a template's own
-// white-filled shapes (die-cut/kiss-cut guide shapes in particular, which
-// are legitimately drawn with fill:#fff since they carry no ink) would
-// otherwise be indistinguishable from an also-white canvas in the exported
-// raster/PDF, hiding the template's true silhouette.
-var rasterCanvasGray = color.RGBA{R: 200, G: 200, B: 200, A: 255}
+// DefaultBackgroundColor is used for RasterizeSVG's canvas and the PDF page
+// background whenever the admin does not pick a color for a given export.
+// Kept white so an SVG template's own shapes (which usually assume a white
+// substrate) look correct by default; admins printing on non-white stock, or
+// wanting to make dead space/die-cut notches visible against the label, can
+// override it per export via ParseHexColor.
+var DefaultBackgroundColor = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
-// addGrayPage adds a new sheetW x sheetH page and fills it with
-// rasterCanvasGray before any label images are placed, so the sheet's own
-// margin/gutter area (outside every placed label image) matches the gray
-// RasterizeSVG now paints behind each label's own template — otherwise the
-// page background would stay white while the dead space inside each label
-// image is gray, which defeats the point of using gray to make a label's
-// true silhouette (and any white die-cut shapes on it) stand out.
-func addGrayPage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH float64) {
+// ParseHexColor parses a "#RRGGBB" or "RRGGBB" string into an opaque
+// color.RGBA. Returns an error for anything else, including 3-digit shorthand
+// or alpha channels, which this pipeline has no use for.
+func ParseHexColor(hex string) (color.RGBA, error) {
+	h := strings.TrimPrefix(strings.TrimSpace(hex), "#")
+	if len(h) != 6 {
+		return color.RGBA{}, fmt.Errorf("invalid_hex_color: %q", hex)
+	}
+	var r, g, b uint8
+	if _, err := fmt.Sscanf(h, "%02x%02x%02x", &r, &g, &b); err != nil {
+		return color.RGBA{}, fmt.Errorf("invalid_hex_color: %q", hex)
+	}
+	return color.RGBA{R: r, G: g, B: b, A: 255}, nil
+}
+
+// addBackgroundPage adds a new sheetW x sheetH page and fills it with bg
+// before any label images are placed, so the sheet's own margin/gutter area
+// (outside every placed label image) matches the color RasterizeSVG paints
+// behind each label's own template — otherwise the page background would
+// stay a different color than the dead space inside each label image.
+func addBackgroundPage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH float64, bg color.RGBA) {
 	pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: sheetW, Ht: sheetH})
-	pdf.SetFillColor(int(rasterCanvasGray.R), int(rasterCanvasGray.G), int(rasterCanvasGray.B))
+	pdf.SetFillColor(int(bg.R), int(bg.G), int(bg.B))
 	pdf.Rect(0, 0, sheetW, sheetH, "F")
 }
 
-// RasterizeSVG rasterizes svgBytes onto an opaque gray (see rasterCanvasGray)
-// widthPx x heightPx canvas (stretching non-uniformly to fill the target
-// exactly, matching how the rest of the label pipeline treats an admin-set
+// RasterizeSVG rasterizes svgBytes onto an opaque bg-filled widthPx x
+// heightPx canvas (stretching non-uniformly to fill the target exactly,
+// matching how the rest of the label pipeline treats an admin-set
 // width_mm/height_mm as authoritative over whatever aspect ratio the source
 // file happens to have) and returns the result PNG-encoded. Used to turn an
 // SVG label template into a template image RenderTiledPDF/RenderTiledGS1PDF
 // can tile, since Go has no in-process SVG->PDF vector converter — rendering
 // at a high enough pixel density keeps the tiled PDF sharp at normal print
 // sizes.
-func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
+func RasterizeSVG(svgBytes []byte, widthPx, heightPx int, bg color.RGBA) ([]byte, error) {
 	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgBytes))
 	if err != nil {
 		return nil, fmt.Errorf("parse svg: %w", err)
@@ -102,7 +115,7 @@ func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 	icon.SetTarget(0, 0, float64(widthPx), float64(heightPx))
 
 	img := image.NewRGBA(image.Rect(0, 0, widthPx, heightPx))
-	draw.Draw(img, img.Bounds(), &image.Uniform{C: rasterCanvasGray}, image.Point{}, draw.Src)
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: bg}, image.Point{}, draw.Src)
 
 	scanner := rasterx.NewScannerGV(widthPx, heightPx, img, img.Bounds())
 	dasher := rasterx.NewDasher(widthPx, heightPx, scanner)
@@ -113,6 +126,136 @@ func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 		return nil, fmt.Errorf("encode png: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// EkeConfig sizes and positions the black L-shaped corner registration marks
+// ("eke") a print vendor's laser cutter uses to align sheets. ThicknessMM is
+// the bar's width, ArmMM is each arm's length measured from the corner, and
+// TopOffsetMM/SideOffsetMM place the bar's OUTER edge relative to the sheet's
+// top and side edges respectively (not its centerline).
+type EkeConfig struct {
+	ThicknessMM   float64
+	ArmMM         float64
+	TopOffsetMM   float64
+	SideOffsetMM  float64
+}
+
+// DefaultEkeConfig is the print vendor's originally requested spec, used
+// whenever an export request leaves any eke field unset/zero.
+func DefaultEkeConfig() EkeConfig {
+	return EkeConfig{ThicknessMM: 3, ArmMM: 40, TopOffsetMM: 3.8, SideOffsetMM: 5}
+}
+
+// PDFExtras bundles the print-production additions layered on top of every
+// tiled PDF page: a background fill color, optional corner registration
+// marks, and an optional trailing cutline page. CutlineSVG == nil means no
+// cutline page is generated (the admin left "Tạo trang cutline" off).
+type PDFExtras struct {
+	BackgroundColor color.RGBA
+	Eke             EkeConfig
+	CutlineSVG      []byte
+}
+
+// drawEkeMarks draws EkeConfig's black L-shaped registration mark at all 4
+// corners of the current page. Each L is built from 2 filled bars (one
+// horizontal, one vertical) meeting at the corner; TopOffsetMM/SideOffsetMM
+// position the bar's outer edge, mirrored per corner so every mark points
+// inward toward the sheet's center.
+func drawEkeMarks(pdf *fpdf.Fpdf, sheetW, sheetH float64, cfg EkeConfig) {
+	pdf.SetFillColor(0, 0, 0)
+	type corner struct{ top, left bool }
+	for _, c := range []corner{{true, true}, {true, false}, {false, true}, {false, false}} {
+		var barX, barY float64
+		if c.left {
+			barX = cfg.SideOffsetMM
+		} else {
+			barX = sheetW - cfg.SideOffsetMM - cfg.ArmMM
+		}
+		if c.top {
+			barY = cfg.TopOffsetMM
+		} else {
+			barY = sheetH - cfg.TopOffsetMM - cfg.ArmMM
+		}
+		// Horizontal arm: full ArmMM length, ThicknessMM tall, flush with the
+		// top/bottom offset line.
+		hY := cfg.TopOffsetMM
+		if !c.top {
+			hY = sheetH - cfg.TopOffsetMM - cfg.ThicknessMM
+		}
+		pdf.Rect(barX, hY, cfg.ArmMM, cfg.ThicknessMM, "F")
+		// Vertical arm: full ArmMM length, ThicknessMM wide, flush with the
+		// left/right offset line.
+		vX := cfg.SideOffsetMM
+		if !c.left {
+			vX = sheetW - cfg.SideOffsetMM - cfg.ThicknessMM
+		}
+		pdf.Rect(vX, barY, cfg.ThicknessMM, cfg.ArmMM, "F")
+	}
+}
+
+// cutlineRasterDPI is the resolution the cutline SVG is rasterized at before
+// being tiled onto the cutline page — matches gs1LabelRasterDPI's sharpness
+// for a normal SVG label template raster.
+const cutlineRasterDPI = 600.0
+
+// cutlineRasterPx converts a physical mm length to a pixel count at
+// cutlineRasterDPI, clamped the same way gs1LabelRasterPx clamps a label
+// template raster.
+func cutlineRasterPx(mm float64) int {
+	px := int(mm / 25.4 * cutlineRasterDPI)
+	if px < 100 {
+		return 100
+	}
+	if px > 8000 {
+		return 8000
+	}
+	return px
+}
+
+// ValidateCutlineSVG rejects an uploaded cutline file that oksvg can't parse
+// or that has no usable viewBox/width-height — the same check RasterizeSVG
+// itself would fail on at export time, run eagerly at upload time so a bad
+// file is caught immediately instead of at the next print export.
+func ValidateCutlineSVG(svgBytes []byte) error {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgBytes))
+	if err != nil {
+		return fmt.Errorf("parse cutline svg: %w", err)
+	}
+	if icon.ViewBox.W <= 0 || icon.ViewBox.H <= 0 {
+		return fmt.Errorf("cutline svg has no usable viewBox/width-height")
+	}
+	return nil
+}
+
+// addCutlinePage appends the final cutline page: a plain white sheet (the
+// laser cutter reads the vector line the cutline SVG itself draws, not the
+// sheet color) tiling the template's cutline SVG — rasterized and placed
+// exactly like a label template image, not redrawn from parsed path data —
+// at every grid cell the content pages used, plus the same eke corner marks
+// as every other page.
+func addCutlinePage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH, margin, gutter, labelW, labelH float64, grid GridSpec, extras PDFExtras) error {
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	addBackgroundPage(pdf, orientation, sheetW, sheetH, white)
+
+	rasterPNG, err := RasterizeSVG(extras.CutlineSVG, cutlineRasterPx(labelW), cutlineRasterPx(labelH), white)
+	if err != nil {
+		return fmt.Errorf("rasterize cutline svg: %w", err)
+	}
+	imgOpts := fpdf.ImageOptions{ImageType: "PNG"}
+	pdf.RegisterImageOptionsReader("cutline", imgOpts, bytes.NewReader(rasterPNG))
+	if pdf.Err() {
+		return fmt.Errorf("register cutline image: %v", pdf.Error())
+	}
+
+	for row := 0; row < grid.Rows; row++ {
+		for col := 0; col < grid.Cols; col++ {
+			cellX := margin + float64(col)*(labelW+gutter)
+			cellY := margin + float64(row)*(labelH+gutter)
+			pdf.ImageOptions("cutline", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
+		}
+	}
+	drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
+	return nil
 }
 
 // RenderTiledPDF builds a print-ready PDF with one page per sheet, tiling the
@@ -126,7 +269,11 @@ func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 // The template image is registered once with fpdf and reused for every cell/page
 // (fpdf embeds identically-named images only once), so PDF size and memory stay
 // roughly proportional to the number of *distinct* barcode images, not the page count.
-func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error)) ([]byte, error) {
+//
+// extras controls the page background color, the black corner registration
+// marks drawn on every page, and an optional trailing cutline page (see
+// PDFExtras).
+func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), extras PDFExtras) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -157,11 +304,12 @@ func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, 
 	qrOpts := fpdf.ImageOptions{ImageType: "PNG"}
 
 	perPage := grid.Cols * grid.Rows
-	addGrayPage(pdf, orientation, sheetW, sheetH)
+	addBackgroundPage(pdf, orientation, sheetW, sheetH, extras.BackgroundColor)
 
 	for i, tok := range tokens {
 		if i > 0 && i%perPage == 0 {
-			addGrayPage(pdf, orientation, sheetW, sheetH)
+			drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
+			addBackgroundPage(pdf, orientation, sheetW, sheetH, extras.BackgroundColor)
 		}
 		posInPage := i % perPage
 		col := posInPage % grid.Cols
@@ -178,6 +326,13 @@ func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, 
 		qrName := "qr_" + tok.Code
 		pdf.RegisterImageOptionsReader(qrName, qrOpts, bytes.NewReader(qrPNG))
 		pdf.ImageOptions(qrName, cellX+qrOffsetX, cellY+qrOffsetY, qrSide, qrSide, false, qrOpts, 0, "")
+	}
+	drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
+
+	if extras.CutlineSVG != nil {
+		if err := addCutlinePage(pdf, orientation, sheetW, sheetH, margin, gutter, labelW, labelH, grid, extras); err != nil {
+			return nil, err
+		}
 	}
 
 	var buf bytes.Buffer
@@ -312,7 +467,7 @@ func gs1SanitizeText(tr func(string) string, s string) string {
 // be unique per physical item — so gs1Fn resolves the barcode image and
 // field values independently for each token, the same way imageFn already
 // does for the per-unit QR.
-func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), gs1Fn func(LabelToken) (GS1FieldValues, []byte, error)) ([]byte, error) {
+func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheetH, labelW, labelH, margin, gutter, qrXRatio, qrYRatio, qrSizeRatio float64, layout GS1Layout, tokens []LabelToken, imageFn func(LabelToken) ([]byte, error), gs1Fn func(LabelToken) (GS1FieldValues, []byte, error), extras PDFExtras) ([]byte, error) {
 	grid, err := GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH)
 	if err != nil {
 		return nil, err
@@ -351,11 +506,12 @@ func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheet
 	barcodeH := layout.BarcodeHRatio * labelH
 
 	perPage := grid.Cols * grid.Rows
-	addGrayPage(pdf, orientation, sheetW, sheetH)
+	addBackgroundPage(pdf, orientation, sheetW, sheetH, extras.BackgroundColor)
 
 	for i, tok := range tokens {
 		if i > 0 && i%perPage == 0 {
-			addGrayPage(pdf, orientation, sheetW, sheetH)
+			drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
+			addBackgroundPage(pdf, orientation, sheetW, sheetH, extras.BackgroundColor)
 		}
 		posInPage := i % perPage
 		col := posInPage % grid.Cols
@@ -403,6 +559,13 @@ func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheet
 		qrName := "qr_" + tok.Code
 		pdf.RegisterImageOptionsReader(qrName, qrOpts, bytes.NewReader(qrPNG))
 		pdf.ImageOptions(qrName, cellX+qrOffsetX, cellY+qrOffsetY, qrSide, qrSide, false, qrOpts, 0, "")
+	}
+	drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
+
+	if extras.CutlineSVG != nil {
+		if err := addCutlinePage(pdf, orientation, sheetW, sheetH, margin, gutter, labelW, labelH, grid, extras); err != nil {
+			return nil, err
+		}
 	}
 
 	var buf bytes.Buffer

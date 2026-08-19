@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -29,29 +30,32 @@ type LabelExportHandler struct {
 }
 
 type labelTemplateInfo struct {
-	ID          int64
-	WidthMM     float64
-	HeightMM    float64
-	FileType    string
-	FilePath    string
-	QRXRatio    float64
-	QRYRatio    float64
-	QRSizeRatio float64
-	IsGS1       bool
-	GS1Layout   services.GS1Layout
+	ID              int64
+	WidthMM         float64
+	HeightMM        float64
+	FileType        string
+	FilePath        string
+	QRXRatio        float64
+	QRYRatio        float64
+	QRSizeRatio     float64
+	IsGS1           bool
+	GS1Layout       services.GS1Layout
+	CutlineFilePath string
 }
 
 func loadLabelTemplate(ctx context.Context, db *pgxpool.Pool, id int64) (*labelTemplateInfo, error) {
 	var t labelTemplateInfo
 	var textObjectsRaw []byte
+	var cutlineFilePath *string
 	err := db.QueryRow(ctx, `
 		SELECT id, width_mm, height_mm, file_type, file_path, qr_x_ratio, qr_y_ratio, qr_size_ratio,
-			is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects
+			is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects,
+			cutline_file_path
 		FROM label_templates WHERE id = $1`, id).Scan(
 		&t.ID, &t.WidthMM, &t.HeightMM, &t.FileType, &t.FilePath,
 		&t.QRXRatio, &t.QRYRatio, &t.QRSizeRatio, &t.IsGS1,
 		&t.GS1Layout.BarcodeXRatio, &t.GS1Layout.BarcodeYRatio, &t.GS1Layout.BarcodeWRatio, &t.GS1Layout.BarcodeHRatio,
-		&textObjectsRaw)
+		&textObjectsRaw, &cutlineFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +64,90 @@ func loadLabelTemplate(ctx context.Context, db *pgxpool.Pool, id int64) (*labelT
 			return nil, fmt.Errorf("parse text_objects: %w", err)
 		}
 	}
+	if cutlineFilePath != nil {
+		t.CutlineFilePath = *cutlineFilePath
+	}
 	return &t, nil
+}
+
+// pdfExtrasBody is the set of print-production fields shared by the plain-QR
+// and GS1 PDF export request bodies: an optional page background color, the
+// cutline-page opt-in, and the 4 eke corner-mark parameters. Embedded into
+// both pdfExportBody and gs1PDFExportBody so the two export handlers stay in
+// sync without duplicating field definitions.
+type pdfExtrasBody struct {
+	BackgroundColor  string  `json:"background_color"`
+	IncludeCutline   bool    `json:"include_cutline"`
+	EkeThicknessMM   float64 `json:"eke_thickness_mm"`
+	EkeArmMM         float64 `json:"eke_arm_mm"`
+	EkeTopOffsetMM   float64 `json:"eke_top_offset_mm"`
+	EkeSideOffsetMM  float64 `json:"eke_side_offset_mm"`
+}
+
+// buildPDFExtras resolves a pdfExtrasBody + the chosen template into the
+// services.PDFExtras RenderTiledPDF/RenderTiledGS1PDF need: parses the
+// optional background color (white by default), fills in any unset eke
+// parameters with DefaultEkeConfig's values, and — if the admin opted into a
+// cutline page — loads and extracts the template's uploaded cutline SVG.
+// Returns a plain error (not a fiber response) so callers can decide the
+// right HTTP status per failure (400 vs 422 vs 500).
+func buildPDFExtras(b pdfExtrasBody, tpl *labelTemplateInfo) (services.PDFExtras, error) {
+	extras := services.PDFExtras{BackgroundColor: services.DefaultBackgroundColor, Eke: services.DefaultEkeConfig()}
+
+	if b.BackgroundColor != "" {
+		bg, err := services.ParseHexColor(b.BackgroundColor)
+		if err != nil {
+			return extras, err
+		}
+		extras.BackgroundColor = bg
+	}
+
+	if b.EkeThicknessMM > 0 {
+		extras.Eke.ThicknessMM = b.EkeThicknessMM
+	}
+	if b.EkeArmMM > 0 {
+		extras.Eke.ArmMM = b.EkeArmMM
+	}
+	if b.EkeTopOffsetMM > 0 {
+		extras.Eke.TopOffsetMM = b.EkeTopOffsetMM
+	}
+	if b.EkeSideOffsetMM > 0 {
+		extras.Eke.SideOffsetMM = b.EkeSideOffsetMM
+	}
+
+	if b.IncludeCutline {
+		if tpl.CutlineFilePath == "" {
+			return extras, fmt.Errorf("cutline_file_missing")
+		}
+		cutlineBytes, err := os.ReadFile(tpl.CutlineFilePath)
+		if err != nil {
+			return extras, fmt.Errorf("cutline_file_read: %w", err)
+		}
+		if err := services.ValidateCutlineSVG(cutlineBytes); err != nil {
+			return extras, fmt.Errorf("cutline_parse_failed: %w", err)
+		}
+		extras.CutlineSVG = cutlineBytes
+	}
+
+	return extras, nil
+}
+
+// pdfExtrasErrorResponse maps a buildPDFExtras error to the right HTTP
+// status: a missing/unparseable cutline file is a client-fixable request
+// problem (422, matching the other layout-validation errors in this file),
+// while a read failure on a file the DB says exists is a server-side fault.
+func pdfExtrasErrorResponse(c *fiber.Ctx, err error) error {
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "cutline_file_missing"):
+		return c.Status(422).JSON(fiber.Map{"error": "cutline_file_missing"})
+	case strings.HasPrefix(msg, "cutline_file_read"):
+		return c.Status(500).JSON(fiber.Map{"error": "cutline_file_read"})
+	case strings.HasPrefix(msg, "cutline_parse_failed"):
+		return c.Status(422).JSON(fiber.Map{"error": "cutline_parse_failed", "detail": msg})
+	default:
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_background_color", "detail": msg})
+	}
 }
 
 func fetchLabelTokens(ctx context.Context, db *pgxpool.Pool, batchID int64, fromSerial, toSerial int, publicBaseURL string) ([]services.LabelToken, error) {
@@ -103,6 +190,7 @@ func resolveSheetSize(preset string, wMM, hMM float64) (float64, float64, error)
 }
 
 type pdfExportBody struct {
+	pdfExtrasBody
 	TemplateID  int64   `json:"template_id"`
 	FromSerial  int     `json:"from_serial"`
 	ToSerial    int     `json:"to_serial"`
@@ -177,6 +265,11 @@ func (h *LabelExportHandler) ExportLabelsPDF(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "no_tokens_in_range"})
 	}
 
+	extras, err := buildPDFExtras(b.pdfExtrasBody, tpl)
+	if err != nil {
+		return pdfExtrasErrorResponse(c, err)
+	}
+
 	tplFile, err := os.Open(tpl.FilePath)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "template_file_read"})
@@ -189,6 +282,7 @@ func (h *LabelExportHandler) ExportLabelsPDF(c *fiber.Ctx) error {
 		tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 		tokens,
 		func(tok services.LabelToken) ([]byte, error) { return services.GenerateQRPNG(tok.URL, b.QRPx) },
+		extras,
 	)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "render_failed", "detail": err.Error()})

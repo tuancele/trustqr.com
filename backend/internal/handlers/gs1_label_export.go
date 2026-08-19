@@ -181,6 +181,7 @@ func (h *GS1LabelExportHandler) createGS1Units(ctx context.Context, labelID int6
 }
 
 type gs1PDFExportBody struct {
+	pdfExtrasBody
 	TemplateID  int64   `json:"template_id"`
 	Quantity    int     `json:"quantity"`
 	SheetPreset string  `json:"sheet_preset"`
@@ -262,6 +263,11 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "unit_gen_failed", "detail": err.Error()})
 	}
 
+	extras, err := buildPDFExtras(b.pdfExtrasBody, tpl)
+	if err != nil {
+		return pdfExtrasErrorResponse(c, err)
+	}
+
 	var templateSrc io.Reader
 	templateType := tpl.FileType
 	if tpl.FileType == "svg" {
@@ -269,7 +275,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 		if readErr != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "template_file_read"})
 		}
-		rasterPNG, rasterErr := services.RasterizeSVG(svgBytes, gs1LabelRasterPx(tpl.WidthMM), gs1LabelRasterPx(tpl.HeightMM))
+		rasterPNG, rasterErr := services.RasterizeSVG(svgBytes, gs1LabelRasterPx(tpl.WidthMM), gs1LabelRasterPx(tpl.HeightMM), extras.BackgroundColor)
 		if rasterErr != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "svg_rasterize_failed", "detail": rasterErr.Error()})
 		}
@@ -305,6 +311,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 			tpl.GS1Layout,
 			tokens, imageFn, gs1Fn,
+			extras,
 		)
 	} else {
 		pdfBytes, err = services.RenderTiledPDF(
@@ -312,6 +319,7 @@ func (h *GS1LabelExportHandler) ExportPDF(c *fiber.Ctx) error {
 			sheetW, sheetH, tpl.WidthMM, tpl.HeightMM, b.MarginMM, b.GutterMM,
 			tpl.QRXRatio, tpl.QRYRatio, tpl.QRSizeRatio,
 			tokens, imageFn,
+			extras,
 		)
 	}
 	if err != nil {

@@ -447,6 +447,7 @@ interface TemplateOption {
   width_mm: number;
   height_mm: number;
   file_type: 'png' | 'jpg' | 'svg';
+  has_cutline: boolean;
 }
 
 function PrintTab({ labelId }: { labelId: number }) {
@@ -462,6 +463,13 @@ function PrintTab({ labelId }: { labelId: number }) {
   const [gutterMM, setGutterMM] = useState(2);
   const [qrPx, setQrPx] = useState(320);
 
+  const [backgroundColor, setBackgroundColor] = useState('#FFFFFF');
+  const [includeCutline, setIncludeCutline] = useState(false);
+  const [ekeThicknessMM, setEkeThicknessMM] = useState(3);
+  const [ekeArmMM, setEkeArmMM] = useState(40);
+  const [ekeTopOffsetMM, setEkeTopOffsetMM] = useState(3.8);
+  const [ekeSideOffsetMM, setEkeSideOffsetMM] = useState(5);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -476,6 +484,10 @@ function PrintTab({ labelId }: { labelId: number }) {
   }, []);
 
   const tpl = templates.find((t) => t.id === templateId) || null;
+
+  useEffect(() => {
+    if (tpl && !tpl.has_cutline) setIncludeCutline(false);
+  }, [tpl]);
   const sheetDims: [number, number] | null =
     sheetPreset === 'custom'
       ? (Number(customW) > 0 && Number(customH) > 0 ? [Number(customW), Number(customH)] : null)
@@ -522,6 +534,12 @@ function PrintTab({ labelId }: { labelId: number }) {
           margin_mm: marginMM,
           gutter_mm: gutterMM,
           qr_px: qrPx,
+          background_color: backgroundColor,
+          include_cutline: includeCutline,
+          eke_thickness_mm: ekeThicknessMM,
+          eke_arm_mm: ekeArmMM,
+          eke_top_offset_mm: ekeTopOffsetMM,
+          eke_side_offset_mm: ekeSideOffsetMM,
         },
         `gs1_${labelId}_labels.pdf`
       );
@@ -669,6 +687,55 @@ function PrintTab({ labelId }: { labelId: number }) {
                 <label className="form-label">Độ phân giải QR (px)</label>
                 <input type="number" min={128} max={1024} step={32} value={qrPx}
                   onChange={(e) => setQrPx(Number(e.target.value) || 320)} className="form-input w-28" />
+              </div>
+              <div>
+                <label className="form-label">Màu nền</label>
+                <input type="color" value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value)} className="h-9 w-16 rounded border border-gray-300 p-0.5" />
+              </div>
+            </div>
+
+            {/* Cutline + eke */}
+            <div className="border-t border-gray-100 pt-4">
+              <div className="flex items-center gap-2">
+                <input
+                  id="include_cutline" type="checkbox"
+                  checked={includeCutline}
+                  disabled={!tpl.has_cutline}
+                  onChange={(e) => setIncludeCutline(e.target.checked)}
+                  className="rounded border-gray-300 text-gov-600 focus:ring-gov-500 disabled:opacity-50"
+                />
+                <label htmlFor="include_cutline" className="text-sm text-gray-700">
+                  Thêm trang khuôn cắt (cutline) cuối file PDF
+                </label>
+              </div>
+              {!tpl.has_cutline && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Mẫu tem này chưa có file khuôn cắt — tải lên trong trang "Chỉnh vị trí" để bật tuỳ chọn này.
+                </p>
+              )}
+
+              <div className="flex gap-4 flex-wrap mt-3">
+                <div>
+                  <label className="form-label">Độ dày eke (mm)</label>
+                  <input type="number" min={0} step="0.1" value={ekeThicknessMM}
+                    onChange={(e) => setEkeThicknessMM(Number(e.target.value) || 0)} className="form-input w-24" />
+                </div>
+                <div>
+                  <label className="form-label">Cạnh eke (mm)</label>
+                  <input type="number" min={0} step="0.5" value={ekeArmMM}
+                    onChange={(e) => setEkeArmMM(Number(e.target.value) || 0)} className="form-input w-24" />
+                </div>
+                <div>
+                  <label className="form-label">Lề trên eke (mm)</label>
+                  <input type="number" min={0} step="0.1" value={ekeTopOffsetMM}
+                    onChange={(e) => setEkeTopOffsetMM(Number(e.target.value) || 0)} className="form-input w-24" />
+                </div>
+                <div>
+                  <label className="form-label">Lề cạnh eke (mm)</label>
+                  <input type="number" min={0} step="0.1" value={ekeSideOffsetMM}
+                    onChange={(e) => setEkeSideOffsetMM(Number(e.target.value) || 0)} className="form-input w-24" />
+                </div>
               </div>
             </div>
 

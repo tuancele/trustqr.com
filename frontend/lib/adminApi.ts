@@ -116,12 +116,13 @@ export async function download(path: string, filename: string) {
 // the multipart boundary itself; setting it manually breaks the upload.
 export async function uploadForm<T = any>(
   path: string,
-  formData: FormData
+  formData: FormData,
+  method: 'POST' | 'PUT' = 'POST'
 ): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
   const doFetch = async (token: string | null) => {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(`${API_URL}${path}`, { method: 'POST', headers, body: formData });
+    return fetch(`${API_URL}${path}`, { method, headers, body: formData });
   };
 
   let token = getAccessToken();

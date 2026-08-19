@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { FileImage, UploadCloud, Trash2, Settings2, Loader2 } from 'lucide-react';
+import { FileImage, UploadCloud, Trash2, Settings2, Loader2, Pencil, Check, X } from 'lucide-react';
 import { api, uploadForm, fetchBlobUrl } from '@/lib/adminApi';
 import { PageHeader, Spinner, EmptyState, Alert } from '@/components/ui';
 
@@ -16,6 +16,7 @@ interface Template {
   qr_y_ratio: number;
   qr_size_ratio: number;
   is_gs1: boolean;
+  has_cutline: boolean;
   created_at: string;
 }
 
@@ -29,9 +30,21 @@ export default function TemplatesPage() {
   const [widthMM, setWidthMM] = useState('');
   const [heightMM, setHeightMM] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [cutlineFile, setCutlineFile] = useState<File | null>(null);
   const [isGS1, setIsGS1] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cutlineInputRef = useRef<HTMLInputElement>(null);
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editWidthMM, setEditWidthMM] = useState('');
+  const [editHeightMM, setEditHeightMM] = useState('');
+  const [editIsGS1, setEditIsGS1] = useState(false);
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editCutlineFile, setEditCutlineFile] = useState<File | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -77,6 +90,7 @@ export default function TemplatesPage() {
     fd.append('height_mm', heightMM);
     fd.append('file', file);
     fd.append('is_gs1', isGS1 ? 'true' : 'false');
+    if (cutlineFile) fd.append('cutline_file', cutlineFile);
     const r = await uploadForm('/api/v1/admin/templates', fd);
     setUploading(false);
     if (r.ok) {
@@ -84,8 +98,10 @@ export default function TemplatesPage() {
       setWidthMM('');
       setHeightMM('');
       setFile(null);
+      setCutlineFile(null);
       setIsGS1(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cutlineInputRef.current) cutlineInputRef.current.value = '';
       load();
     } else {
       setError(r.error || 'Tải lên thất bại');
@@ -97,6 +113,46 @@ export default function TemplatesPage() {
     const r = await api(`/api/v1/admin/templates/${t.id}`, { method: 'DELETE' });
     if (r.ok) load();
     else alert('Lỗi: ' + r.error);
+  }
+
+  function startEdit(t: Template) {
+    setEditingId(t.id);
+    setEditName(t.name);
+    setEditWidthMM(String(t.width_mm));
+    setEditHeightMM(String(t.height_mm));
+    setEditIsGS1(t.is_gs1);
+    setEditFile(null);
+    setEditCutlineFile(null);
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditError(null);
+  }
+
+  async function saveEdit(t: Template) {
+    if (!editName.trim() || !editWidthMM || !editHeightMM) {
+      setEditError('Điền đủ tên và kích thước.');
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    const fd = new FormData();
+    fd.append('name', editName.trim());
+    fd.append('width_mm', editWidthMM);
+    fd.append('height_mm', editHeightMM);
+    fd.append('is_gs1', editIsGS1 ? 'true' : 'false');
+    if (editFile) fd.append('file', editFile);
+    if (editCutlineFile) fd.append('cutline_file', editCutlineFile);
+    const r = await uploadForm(`/api/v1/admin/templates/${t.id}`, fd, 'PUT');
+    setEditSaving(false);
+    if (r.ok) {
+      setEditingId(null);
+      load();
+    } else {
+      setEditError(r.error || 'Cập nhật thất bại');
+    }
   }
 
   return (
@@ -157,6 +213,20 @@ export default function TemplatesPage() {
             </label>
           </div>
           <div className="lg:col-span-5">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              File khuôn cắt (cutline SVG) — tùy chọn
+            </label>
+            <input
+              ref={cutlineInputRef}
+              type="file" accept=".svg"
+              onChange={(e) => setCutlineFile(e.target.files?.[0] || null)}
+              className="form-input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gov-50 file:text-gov-700 file:text-xs"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              File vector (đường đỏ) mô tả đúng hình dạng cắt thực tế — dùng để tạo trang cutline riêng khi xuất PDF cho xưởng cắt laser.
+            </p>
+          </div>
+          <div className="lg:col-span-5">
             <button type="submit" disabled={uploading} className="btn-primary">
               {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
               {uploading ? 'Đang tải lên...' : 'Tải lên'}
@@ -188,29 +258,116 @@ export default function TemplatesPage() {
                 )}
               </div>
               <div className="p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 truncate">{t.name}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{t.width_mm} × {t.height_mm} mm</p>
+                {editingId === t.id ? (
+                  <div className="space-y-2">
+                    {editError && <Alert kind="danger">{editError}</Alert>}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tên mẫu tem</label>
+                      <input
+                        value={editName} onChange={(e) => setEditName(e.target.value)}
+                        className="form-input text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Rộng (mm)</label>
+                        <input
+                          type="number" step="0.1" min="0.1"
+                          value={editWidthMM} onChange={(e) => setEditWidthMM(e.target.value)}
+                          className="form-input text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Cao (mm)</label>
+                        <input
+                          type="number" step="0.1" min="0.1"
+                          value={editHeightMM} onChange={(e) => setEditHeightMM(e.target.value)}
+                          className="form-input text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id={`edit_is_gs1_${t.id}`} type="checkbox"
+                        checked={editIsGS1} onChange={(e) => setEditIsGS1(e.target.checked)}
+                        className="rounded border-gray-300 text-gov-600 focus:ring-gov-500"
+                      />
+                      <label htmlFor={`edit_is_gs1_${t.id}`} className="text-xs text-gray-700">
+                        Mẫu tem GS1
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Thay file thiết kế — bỏ trống để giữ nguyên
+                      </label>
+                      <input
+                        type="file" accept=".png,.jpg,.jpeg,.svg"
+                        onChange={(e) => setEditFile(e.target.files?.[0] || null)}
+                        className="form-input text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gov-50 file:text-gov-700 file:text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Thay file khuôn cắt (SVG) — bỏ trống để giữ nguyên
+                      </label>
+                      <input
+                        type="file" accept=".svg"
+                        onChange={(e) => setEditCutlineFile(e.target.files?.[0] || null)}
+                        className="form-input text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gov-50 file:text-gov-700 file:text-xs"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => saveEdit(t)}
+                        disabled={editSaving}
+                        className="btn-primary flex-1 justify-center text-xs"
+                      >
+                        {editSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        Lưu
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        disabled={editSaving}
+                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className={t.file_type === 'svg' ? 'badge-info' : 'badge-success'}>
-                      {t.file_type.toUpperCase()}
-                    </span>
-                    {t.is_gs1 && <span className="badge-warning">GS1</span>}
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <Link href={`/admin/templates/${t.id}`} className="btn-secondary flex-1 justify-center text-xs">
-                    <Settings2 className="w-3.5 h-3.5" /> {t.is_gs1 ? 'Vị trí đối tượng' : 'Vị trí QR'}
-                  </Link>
-                  <button
-                    onClick={() => del(t)}
-                    className="inline-flex items-center justify-center px-2.5 py-1.5 rounded-md bg-red-50 text-red-700 hover:bg-red-100 text-xs font-medium transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                ) : (
+                  <>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">{t.name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{t.width_mm} × {t.height_mm} mm</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={t.file_type === 'svg' ? 'badge-info' : 'badge-success'}>
+                          {t.file_type.toUpperCase()}
+                        </span>
+                        {t.is_gs1 && <span className="badge-warning">GS1</span>}
+                        {t.has_cutline && <span className="badge-info">Cutline</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <Link href={`/admin/templates/${t.id}`} className="btn-secondary flex-1 justify-center text-xs">
+                        <Settings2 className="w-3.5 h-3.5" /> {t.is_gs1 ? 'Vị trí đối tượng' : 'Vị trí QR'}
+                      </Link>
+                      <button
+                        onClick={() => startEdit(t)}
+                        className="inline-flex items-center justify-center px-2.5 py-1.5 rounded-md bg-gov-50 text-gov-700 hover:bg-gov-100 text-xs font-medium transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => del(t)}
+                        className="inline-flex items-center justify-center px-2.5 py-1.5 rounded-md bg-red-50 text-red-700 hover:bg-red-100 text-xs font-medium transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ))}
