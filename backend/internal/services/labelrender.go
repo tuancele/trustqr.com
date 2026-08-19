@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
 	"io"
@@ -60,14 +61,23 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 	return GridSpec{Cols: cols, Rows: rows}, nil
 }
 
-// RasterizeSVG rasterizes svgBytes onto an opaque white widthPx x heightPx
-// canvas (stretching non-uniformly to fill the target exactly, matching how
-// the rest of the label pipeline treats an admin-set width_mm/height_mm as
-// authoritative over whatever aspect ratio the source file happens to have)
-// and returns the result PNG-encoded. Used to turn an SVG label template
-// into a template image RenderTiledPDF/RenderTiledGS1PDF can tile, since Go
-// has no in-process SVG->PDF vector converter — rendering at a high enough
-// pixel density keeps the tiled PDF sharp at normal print sizes.
+// rasterCanvasGray is the fill color RasterizeSVG paints behind the parsed
+// SVG before drawing it. It is deliberately not white: a template's own
+// white-filled shapes (die-cut/kiss-cut guide shapes in particular, which
+// are legitimately drawn with fill:#fff since they carry no ink) would
+// otherwise be indistinguishable from an also-white canvas in the exported
+// raster/PDF, hiding the template's true silhouette.
+var rasterCanvasGray = color.RGBA{R: 200, G: 200, B: 200, A: 255}
+
+// RasterizeSVG rasterizes svgBytes onto an opaque gray (see rasterCanvasGray)
+// widthPx x heightPx canvas (stretching non-uniformly to fill the target
+// exactly, matching how the rest of the label pipeline treats an admin-set
+// width_mm/height_mm as authoritative over whatever aspect ratio the source
+// file happens to have) and returns the result PNG-encoded. Used to turn an
+// SVG label template into a template image RenderTiledPDF/RenderTiledGS1PDF
+// can tile, since Go has no in-process SVG->PDF vector converter — rendering
+// at a high enough pixel density keeps the tiled PDF sharp at normal print
+// sizes.
 func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgBytes))
 	if err != nil {
@@ -79,7 +89,7 @@ func RasterizeSVG(svgBytes []byte, widthPx, heightPx int) ([]byte, error) {
 	icon.SetTarget(0, 0, float64(widthPx), float64(heightPx))
 
 	img := image.NewRGBA(image.Rect(0, 0, widthPx, heightPx))
-	draw.Draw(img, img.Bounds(), image.White, image.Point{}, draw.Src)
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: rasterCanvasGray}, image.Point{}, draw.Src)
 
 	scanner := rasterx.NewScannerGV(widthPx, heightPx, img, img.Bounds())
 	dasher := rasterx.NewDasher(widthPx, heightPx, scanner)
