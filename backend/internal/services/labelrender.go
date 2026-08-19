@@ -263,6 +263,42 @@ func (a *cutlinePathAdder) Stop(closeLoop bool) {
 	}
 }
 
+// cutlineBoundsAdder implements rasterx.Adder and tracks the bounding box of
+// every point it receives. Used to measure the actual drawn extent of the
+// cutline's stroked paths — which is often smaller than the SVG's own
+// viewBox/canvas (design tools commonly leave blank margin around the
+// artwork) — so that extent, not the raw viewBox, can be fit to the label's
+// real width/height.
+type cutlineBoundsAdder struct {
+	minX, minY, maxX, maxY float64
+	started                bool
+}
+
+func (a *cutlineBoundsAdder) include(p fixed.Point26_6) {
+	x, y := fixedToMM(p)
+	if !a.started {
+		a.minX, a.maxX, a.minY, a.maxY, a.started = x, x, y, y, true
+		return
+	}
+	a.minX = math.Min(a.minX, x)
+	a.maxX = math.Max(a.maxX, x)
+	a.minY = math.Min(a.minY, y)
+	a.maxY = math.Max(a.maxY, y)
+}
+
+func (a *cutlineBoundsAdder) Start(p fixed.Point26_6) { a.include(p) }
+func (a *cutlineBoundsAdder) Line(p fixed.Point26_6)  { a.include(p) }
+func (a *cutlineBoundsAdder) QuadBezier(b, c fixed.Point26_6) {
+	a.include(b)
+	a.include(c)
+}
+func (a *cutlineBoundsAdder) CubeBezier(b, c, d fixed.Point26_6) {
+	a.include(b)
+	a.include(c)
+	a.include(d)
+}
+func (a *cutlineBoundsAdder) Stop(closeLoop bool) {}
+
 // addCutlinePage appends the final cutline page: a plain white sheet tiling
 // the template's cutline SVG at every grid cell the content pages used, plus
 // the same eke corner marks as every other page. The cutline is drawn as
@@ -280,10 +316,31 @@ func addCutlinePage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH, margin, 
 	if icon.ViewBox.W <= 0 || icon.ViewBox.H <= 0 {
 		return fmt.Errorf("cutline svg has no usable viewBox/width-height")
 	}
+
+	// Fit the cutline's actual drawn extent — not its raw viewBox — to the
+	// label's real width/height. Cutline files exported from design tools
+	// routinely carry blank canvas margin around the die-line artwork, so
+	// scaling the full viewBox into labelW x labelH would undersize the
+	// visible cut shape. Measuring the stroked paths' own bounding box and
+	// fitting that instead makes the die line span exactly labelW x labelH,
+	// matching the label's actual printed size.
+	bounds := &cutlineBoundsAdder{}
+	for i := range icon.SVGPaths {
+		path := &icon.SVGPaths[i]
+		if !path.HasStroke() {
+			continue
+		}
+		path.AddTransformedTo(bounds, rasterx.Identity)
+	}
+	if !bounds.started || bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY {
+		return fmt.Errorf("cutline svg has no measurable stroked geometry")
+	}
+	scaleX := labelW / (bounds.maxX - bounds.minX)
+	scaleY := labelH / (bounds.maxY - bounds.minY)
 	// Target dimensions in millimeters (not pixels): icon.Transform then maps
-	// SVG viewBox coordinates straight into the PDF's own mm coordinate
-	// space, so no separate DPI/pixel conversion is needed anywhere below.
-	icon.SetTarget(0, 0, labelW, labelH)
+	// SVG coordinates straight into the PDF's own mm coordinate space, so no
+	// separate DPI/pixel conversion is needed anywhere below.
+	icon.Transform = rasterx.Identity.Scale(scaleX, scaleY).Translate(-bounds.minX, -bounds.minY)
 
 	for row := 0; row < grid.Rows; row++ {
 		for col := 0; col < grid.Cols; col++ {
