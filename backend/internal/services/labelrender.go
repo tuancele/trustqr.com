@@ -11,6 +11,7 @@ import (
 	"image/draw"
 	"image/png"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/go-pdf/fpdf"
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
+	"golang.org/x/image/math/fixed"
 )
 
 // LabelToken is one QR code to be placed on the print sheet / SVG output.
@@ -193,25 +195,6 @@ func drawEkeMarks(pdf *fpdf.Fpdf, sheetW, sheetH float64, cfg EkeConfig) {
 	}
 }
 
-// cutlineRasterDPI is the resolution the cutline SVG is rasterized at before
-// being tiled onto the cutline page — matches gs1LabelRasterDPI's sharpness
-// for a normal SVG label template raster.
-const cutlineRasterDPI = 600.0
-
-// cutlineRasterPx converts a physical mm length to a pixel count at
-// cutlineRasterDPI, clamped the same way gs1LabelRasterPx clamps a label
-// template raster.
-func cutlineRasterPx(mm float64) int {
-	px := int(mm / 25.4 * cutlineRasterDPI)
-	if px < 100 {
-		return 100
-	}
-	if px > 8000 {
-		return 8000
-	}
-	return px
-}
-
 // ValidateCutlineSVG rejects an uploaded cutline file that oksvg can't parse
 // or that has no usable viewBox/width-height — the same check RasterizeSVG
 // itself would fail on at export time, run eagerly at upload time so a bad
@@ -227,33 +210,131 @@ func ValidateCutlineSVG(svgBytes []byte) error {
 	return nil
 }
 
-// addCutlinePage appends the final cutline page: a plain white sheet (the
-// laser cutter reads the vector line the cutline SVG itself draws, not the
-// sheet color) tiling the template's cutline SVG — rasterized and placed
-// exactly like a label template image, not redrawn from parsed path data —
-// at every grid cell the content pages used, plus the same eke corner marks
-// as every other page.
+// cutlinePathAdder implements rasterx.Adder. SvgPath.AddTransformedTo feeds
+// it path segments already transformed into millimeter space (see
+// addCutlinePage), so it only has to forward them to fpdf's vector
+// path-construction calls — the cutline is drawn as genuine PDF vector
+// paths, never rasterized to an image.
+type cutlinePathAdder struct {
+	pdf        *fpdf.Fpdf
+	curX, curY float64
+}
+
+func fixedToMM(p fixed.Point26_6) (float64, float64) {
+	return float64(p.X) / 64, float64(p.Y) / 64
+}
+
+func (a *cutlinePathAdder) Start(p fixed.Point26_6) {
+	a.curX, a.curY = fixedToMM(p)
+	a.pdf.MoveTo(a.curX, a.curY)
+}
+
+func (a *cutlinePathAdder) Line(p fixed.Point26_6) {
+	a.curX, a.curY = fixedToMM(p)
+	a.pdf.LineTo(a.curX, a.curY)
+}
+
+// QuadBezier elevates the SVG quadratic curve to an equivalent cubic, since
+// PDF path operators have no native quadratic form. fpdf's own CurveTo
+// helper emits the PDF "v" operator, which is a different (non-equivalent)
+// cubic shape rather than a true quadratic, so it can't be reused here.
+func (a *cutlinePathAdder) QuadBezier(b, c fixed.Point26_6) {
+	bx, by := fixedToMM(b)
+	cx, cy := fixedToMM(c)
+	c1x := a.curX + 2.0/3.0*(bx-a.curX)
+	c1y := a.curY + 2.0/3.0*(by-a.curY)
+	c2x := cx + 2.0/3.0*(bx-cx)
+	c2y := cy + 2.0/3.0*(by-cy)
+	a.pdf.CurveBezierCubicTo(c1x, c1y, c2x, c2y, cx, cy)
+	a.curX, a.curY = cx, cy
+}
+
+func (a *cutlinePathAdder) CubeBezier(b, c, d fixed.Point26_6) {
+	bx, by := fixedToMM(b)
+	cx, cy := fixedToMM(c)
+	dx, dy := fixedToMM(d)
+	a.pdf.CurveBezierCubicTo(bx, by, cx, cy, dx, dy)
+	a.curX, a.curY = dx, dy
+}
+
+func (a *cutlinePathAdder) Stop(closeLoop bool) {
+	if closeLoop {
+		a.pdf.ClosePath()
+	}
+}
+
+// addCutlinePage appends the final cutline page: a plain white sheet tiling
+// the template's cutline SVG at every grid cell the content pages used, plus
+// the same eke corner marks as every other page. The cutline is drawn as
+// true PDF vector paths (via oksvg's parsed path data fed straight into
+// fpdf's path-construction calls) rather than rasterized, so line quality
+// matches the source SVG exactly regardless of print size.
 func addCutlinePage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH, margin, gutter, labelW, labelH float64, grid GridSpec, extras PDFExtras) error {
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	addBackgroundPage(pdf, orientation, sheetW, sheetH, white)
 
-	rasterPNG, err := RasterizeSVG(extras.CutlineSVG, cutlineRasterPx(labelW), cutlineRasterPx(labelH), white)
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(extras.CutlineSVG))
 	if err != nil {
-		return fmt.Errorf("rasterize cutline svg: %w", err)
+		return fmt.Errorf("parse cutline svg: %w", err)
 	}
-	imgOpts := fpdf.ImageOptions{ImageType: "PNG"}
-	pdf.RegisterImageOptionsReader("cutline", imgOpts, bytes.NewReader(rasterPNG))
-	if pdf.Err() {
-		return fmt.Errorf("register cutline image: %v", pdf.Error())
+	if icon.ViewBox.W <= 0 || icon.ViewBox.H <= 0 {
+		return fmt.Errorf("cutline svg has no usable viewBox/width-height")
 	}
+	// Target dimensions in millimeters (not pixels): icon.Transform then maps
+	// SVG viewBox coordinates straight into the PDF's own mm coordinate
+	// space, so no separate DPI/pixel conversion is needed anywhere below.
+	icon.SetTarget(0, 0, labelW, labelH)
 
 	for row := 0; row < grid.Rows; row++ {
 		for col := 0; col < grid.Cols; col++ {
 			cellX := margin + float64(col)*(labelW+gutter)
 			cellY := margin + float64(row)*(labelH+gutter)
-			pdf.ImageOptions("cutline", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
+			cellTransform := rasterx.Identity.Translate(cellX, cellY).Mult(icon.Transform)
+
+			for i := range icon.SVGPaths {
+				path := &icon.SVGPaths[i]
+				if !path.HasStroke() {
+					continue
+				}
+
+				// Effective local-units-to-mm scale for this path (its own
+				// nested-group transform composed with the cell placement),
+				// used to convert stroke width/dash lengths into mm.
+				composed := path.ComposedTransform(cellTransform)
+				vx, vy := composed.TransformVector(1, 0)
+				scaleX := math.Hypot(vx, vy)
+				vx2, vy2 := composed.TransformVector(0, 1)
+				scaleY := math.Hypot(vx2, vy2)
+				scale := (scaleX + scaleY) / 2
+
+				lineWidth := path.LineWidth * scale
+				if lineWidth <= 0 {
+					lineWidth = 0.1
+				}
+				r, g, b, _ := path.GetLineColor().RGBA()
+				pdf.SetDrawColor(int(r>>8), int(g>>8), int(b>>8))
+				pdf.SetLineWidth(lineWidth)
+				pdf.SetLineCapStyle("round")
+				pdf.SetLineJoinStyle("round")
+				if len(path.Dash) > 0 {
+					scaledDash := make([]float64, len(path.Dash))
+					for di, d := range path.Dash {
+						scaledDash[di] = d * scale
+					}
+					pdf.SetDashPattern(scaledDash, path.DashOffset*scale)
+				} else {
+					pdf.SetDashPattern(nil, 0)
+				}
+
+				path.AddTransformedTo(&cutlinePathAdder{pdf: pdf}, cellTransform)
+				pdf.DrawPath("D")
+			}
 		}
 	}
+	if pdf.Err() {
+		return fmt.Errorf("draw cutline paths: %v", pdf.Error())
+	}
+
 	drawEkeMarks(pdf, sheetW, sheetH, extras.Eke)
 	return nil
 }

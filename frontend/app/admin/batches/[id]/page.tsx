@@ -640,10 +640,10 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
               </div>
               {sheetPreset === 'custom' && (
                 <div className="flex items-center gap-3 mt-2">
-                  <input type="number" min={1} value={customW} onChange={(e) => setCustomW(e.target.value)}
+                  <input type="number" min={1} step="0.1" value={customW} onChange={(e) => setCustomW(e.target.value)}
                     placeholder="Rộng (mm)" className="form-input w-32" />
                   <span className="text-gray-400">×</span>
-                  <input type="number" min={1} value={customH} onChange={(e) => setCustomH(e.target.value)}
+                  <input type="number" min={1} step="0.1" value={customH} onChange={(e) => setCustomH(e.target.value)}
                     placeholder="Cao (mm)" className="form-input w-32" />
                 </div>
               )}
@@ -653,12 +653,12 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
             <div className="flex gap-4">
               <div>
                 <label className="form-label">Lề (mm)</label>
-                <input type="number" min={0} step="0.5" value={marginMM}
+                <input type="number" min={0} step="0.1" value={marginMM}
                   onChange={(e) => setMarginMM(Number(e.target.value) || 0)} className="form-input w-28" />
               </div>
               <div>
                 <label className="form-label">Khoảng cách tem (mm)</label>
-                <input type="number" min={0} step="0.5" value={gutterMM}
+                <input type="number" min={0} step="0.1" value={gutterMM}
                   onChange={(e) => setGutterMM(Number(e.target.value) || 0)} className="form-input w-28" />
               </div>
               <div>
@@ -701,7 +701,7 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
                 </div>
                 <div>
                   <label className="form-label">Cạnh eke (mm)</label>
-                  <input type="number" min={0} step="0.5" value={ekeArmMM}
+                  <input type="number" min={0} step="0.1" value={ekeArmMM}
                     onChange={(e) => setEkeArmMM(Number(e.target.value) || 0)} className="form-input w-24" />
                 </div>
                 <div>

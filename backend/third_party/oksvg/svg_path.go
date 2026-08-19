@@ -89,6 +89,31 @@ func (svgp *SvgPath) DrawTransformed(r *rasterx.Dasher, opacity float64, t raste
 	}
 }
 
+// AddTransformedTo feeds this path's own segments into q, transformed by t
+// composed with this path's own nested-group transform (e.g. a parent <g
+// transform="...">) — the exact composition DrawTransformed uses when
+// rasterizing, so a caller that wants the same coordinates without going
+// through a raster Dasher (e.g. a vector PDF exporter) gets an identical
+// result to what actually renders.
+func (svgp *SvgPath) AddTransformedTo(q rasterx.Adder, t rasterx.Matrix2D) {
+	svgp.Path.AddTo(&rasterx.MatrixAdder{Adder: q, M: t.Mult(svgp.mAdder.M)})
+}
+
+// HasStroke reports whether this path has a stroke paint defined (as opposed
+// to GetLineColor, which always returns a color — defaulting to black — even
+// for a path with no stroke at all).
+func (svgp *SvgPath) HasStroke() bool {
+	return svgp.linerColor != nil
+}
+
+// ComposedTransform returns t composed with this path's own nested-group
+// transform — the exact matrix AddTransformedTo applies to every point.
+// Callers use this to convert path-local lengths (stroke width, dash
+// pattern) into whatever units t's points end up in, via TransformVector.
+func (svgp *SvgPath) ComposedTransform(t rasterx.Matrix2D) rasterx.Matrix2D {
+	return t.Mult(svgp.mAdder.M)
+}
+
 // GetFillColor returns the fill color of the SvgPath if one is defined and otherwise returns colornames.Black
 func (svgp *SvgPath) GetFillColor() color.Color {
 	return getColor(svgp.fillerColor)
