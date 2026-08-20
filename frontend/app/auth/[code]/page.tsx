@@ -133,6 +133,7 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
 
         <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
           <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Traceability (GS1)</h2>
+          {result.spec && <MedicalLabelStrip result={result} />}
           <InfoRow icon={Tag} label="GTIN" value={<span className="font-mono inline-flex items-center gap-1.5">{result.gtin || '—'}<GtinHelp gtin={result.gtin} /></span>} />
           <InfoRow icon={Hash} label="Lot / Batch" value={<span className="font-mono">{result.lot || '—'}</span>} />
           <InfoRow icon={Hash} label="Serial Number" value={<span className="font-mono">{result.serial || '—'}</span>} />
@@ -221,6 +222,36 @@ function InvalidView() {
         </div>
       </div>
     </main>
+  );
+}
+
+function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyResult }) {
+  const barColor = result.label_color || '#475569';
+  return (
+    <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+      <div className="w-6 flex-shrink-0 flex items-center justify-center py-2" style={{ backgroundColor: barColor }}>
+        <span
+          className="text-white text-[9px] font-bold tracking-widest whitespace-nowrap"
+          style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+        >
+          SUPER LINE
+        </span>
+      </div>
+      <div className="flex flex-col items-center justify-center gap-1 px-2 py-2 border-r border-slate-100">
+        <span className="text-[9px] font-bold border border-slate-700 text-slate-700 rounded px-1 leading-tight">REF</span>
+        <span className="text-[8px] text-slate-500 text-center leading-tight">S.L.A.<br />Surface</span>
+      </div>
+      <div className="flex-1 min-w-0 flex flex-col justify-center px-3 py-2">
+        <span className="font-bold text-slate-900 text-sm leading-tight truncate">{result.spec}</span>
+        {result.size_spec && <span className="text-[11px] text-slate-500 leading-tight truncate">{result.size_spec}</span>}
+      </div>
+      {result.barcode_image && (
+        <div className="flex flex-col items-center justify-center px-3 py-2 border-l border-slate-100 flex-shrink-0">
+          <img src={result.barcode_image} alt="Barcode" className="h-8 w-24 object-contain" />
+          {result.serial && <span className="text-[9px] font-mono text-slate-600 mt-0.5 whitespace-nowrap">{result.serial}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

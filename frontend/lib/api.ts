@@ -130,6 +130,9 @@ export interface GS1VerifyResult {
   product_name?: string;
   product_code?: string;
   spec?: string;
+  size_spec?: string;
+  label_color?: string;
+  barcode_image?: string;
   unit?: string;
   manufacturer?: string;
   origin_country?: string;

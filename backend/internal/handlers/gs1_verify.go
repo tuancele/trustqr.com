@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +17,29 @@ import (
 	"trustqr/backend/internal/middleware"
 	"trustqr/backend/internal/services"
 )
+
+// specLineColors maps a spec code's prefix to the accent color of the
+// physical label's side bar for that product line (assigned by the brand,
+// not derived from anything else in the data). Checked longest-prefix-first
+// so "FXS50" doesn't shadow a hypothetical more specific future prefix.
+var specLineColors = []struct {
+	prefix string
+	color  string
+}{
+	{"FXS50", "#b11f24"},
+	{"FXS45", "#201e5a"},
+	{"FXS40", "#2a9b47"},
+	{"FXS36", "#efe313"},
+}
+
+func labelColorForSpec(spec string) string {
+	for _, sc := range specLineColors {
+		if strings.HasPrefix(spec, sc.prefix) {
+			return sc.color
+		}
+	}
+	return ""
+}
 
 // GS1VerifyHandler serves the public consumer-facing verification page for
 // GS1 labels (/auth/:code on the frontend) — separate from qr.go's
@@ -43,6 +67,9 @@ type gs1VerifyResp struct {
 	ProductName     string  `json:"product_name,omitempty"`
 	ProductCode     string  `json:"product_code,omitempty"`
 	Spec            string  `json:"spec,omitempty"`
+	SizeSpec        string  `json:"size_spec,omitempty"`
+	LabelColor      string  `json:"label_color,omitempty"`
+	BarcodeImage    string  `json:"barcode_image,omitempty"`
 	Unit            string  `json:"unit,omitempty"`
 	Manufacturer    string  `json:"manufacturer,omitempty"`
 	OriginCountry   string  `json:"origin_country,omitempty"`
@@ -90,6 +117,7 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		productName     *string
 		productCode     *string
 		spec            *string
+		sizeSpec        *string
 		unit            *string
 		manufacturer    *string
 		originCountry   *string
@@ -122,13 +150,13 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 
 	err = h.DB.QueryRow(ctx, `
 		SELECT gl.gtin, gl.manufacture_date, gl.expiry_date, gl.lot, gl.serial,
-		       gl.product_name, gl.product_code, gl.spec, gl.unit, gl.manufacturer, gl.origin_country,
+		       gl.product_name, gl.product_code, gl.spec, gl.size_spec, gl.unit, gl.manufacturer, gl.origin_country,
 		       gl.brand_id, COALESCE(b.name,''), COALESCE(b.website,''), (b.logo_path IS NOT NULL)
 		FROM gs1_labels gl
 		LEFT JOIN brands b ON b.id = gl.brand_id
 		WHERE gl.id = $1
 	`, labelID).Scan(&gtin, &manufactureDate, &expiryDate, &lot, &serial,
-		&productName, &productCode, &spec, &unit, &manufacturer, &originCountry,
+		&productName, &productCode, &spec, &sizeSpec, &unit, &manufacturer, &originCountry,
 		&brandID, &brandName, &brandWebsite, &brandHasLogo)
 	if err != nil {
 		log.Printf("gs1 verify label lookup error: %v", err)
@@ -183,6 +211,13 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 	}
 	if spec != nil {
 		resp.Spec = *spec
+		resp.LabelColor = labelColorForSpec(*spec)
+	}
+	if sizeSpec != nil {
+		resp.SizeSpec = *sizeSpec
+	}
+	if png, err := services.GenerateBarcodePNG(serial, 480, 120); err == nil {
+		resp.BarcodeImage = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 	}
 	if unit != nil {
 		resp.Unit = *unit
