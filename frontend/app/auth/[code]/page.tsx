@@ -237,20 +237,24 @@ function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyRe
           SUPER LINE
         </span>
       </div>
-      <div className="flex flex-col items-center justify-center gap-1 px-2 py-2 border-r border-slate-100">
-        <span className="text-[9px] font-bold border border-slate-700 text-slate-700 rounded px-1 leading-tight">REF</span>
-        <span className="text-[8px] text-slate-500 text-center leading-tight">S.L.A.<br />Surface</span>
-      </div>
-      <div className="flex-1 min-w-0 flex flex-col justify-center px-3 py-2">
-        <span className="font-bold text-slate-900 text-sm leading-tight truncate">{result.spec}</span>
-        {result.size_spec && <span className="text-[11px] text-slate-500 leading-tight truncate">{result.size_spec}</span>}
-      </div>
-      {result.barcode_image && (
-        <div className="flex flex-col items-center justify-center px-3 py-2 border-l border-slate-100 flex-shrink-0">
-          <img src={result.barcode_image} alt="Barcode" className="h-8 w-24 object-contain" />
-          {result.serial && <span className="text-[9px] font-mono text-slate-600 mt-0.5 whitespace-nowrap">{result.serial}</span>}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex items-stretch border-b border-slate-100">
+          <div className="flex flex-col items-center justify-center gap-1 px-2 py-2 border-r border-slate-100 flex-shrink-0">
+            <span className="text-[9px] font-bold border border-slate-700 text-slate-700 rounded px-1 leading-tight">REF</span>
+            <span className="text-[8px] text-slate-500 text-center leading-tight">S.L.A.<br />Surface</span>
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col justify-center px-3 py-2">
+            <span className="font-bold text-slate-900 text-sm leading-tight">{result.spec}</span>
+            {result.size_spec && <span className="text-[11px] text-slate-500 leading-tight break-words">{result.size_spec}</span>}
+          </div>
         </div>
-      )}
+        {result.barcode_image && (
+          <div className="flex items-center justify-center gap-2 px-3 py-2">
+            <img src={result.barcode_image} alt="Barcode" className="h-8 max-w-[65%] w-auto object-contain" />
+            {result.serial && <span className="text-[9px] font-mono text-slate-600 whitespace-nowrap">{result.serial}</span>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
