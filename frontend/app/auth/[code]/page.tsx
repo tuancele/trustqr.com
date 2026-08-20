@@ -30,9 +30,10 @@ function fmtDateTimeEN(d: string | null | undefined): string {
 export default async function GS1AuthPage({ params }: { params: { code: string } }) {
   const h = headers();
   const ua = h.get('user-agent') || '';
+  const ip = h.get('x-forwarded-for') || h.get('x-real-ip') || '';
   if (!isMobileUA(ua) && !(await isAdminSession(h.get('cookie') || ''))) return <DesktopOnlyView />;
 
-  const result = await verifyGS1Code(params.code);
+  const result = await verifyGS1Code(params.code, ip);
 
   if (!result || !result.valid) return <InvalidView />;
 

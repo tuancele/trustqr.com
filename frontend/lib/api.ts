@@ -148,11 +148,14 @@ export interface GS1VerifyResult {
   locked?: boolean;
 }
 
-export async function verifyGS1Code(code: string): Promise<GS1VerifyResult | null> {
+export async function verifyGS1Code(code: string, ip?: string): Promise<GS1VerifyResult | null> {
   try {
     const res = await fetch(`${API_URL}/api/v1/gs1/verify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(ip ? { 'X-Forwarded-For': ip } : {}),
+      },
       body: JSON.stringify({ code }),
       cache: 'no-store',
     });
