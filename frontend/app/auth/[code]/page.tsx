@@ -249,9 +249,9 @@ function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyRe
           </div>
         </div>
         {result.barcode_image && (
-          <div className="flex items-center justify-center gap-2 px-3 py-2">
+          <div className="flex flex-col items-center justify-center px-3 py-2">
             <img src={result.barcode_image} alt="Barcode" className="h-8 max-w-[65%] w-auto object-contain" />
-            {result.serial && <span className="text-[9px] font-mono text-slate-600 whitespace-nowrap">{result.serial}</span>}
+            {result.serial && <span className="text-[9px] font-mono text-slate-600 mt-0.5 whitespace-nowrap">{result.serial}</span>}
           </div>
         )}
       </div>
