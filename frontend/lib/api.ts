@@ -110,6 +110,22 @@ export interface PromoBanner {
   link_url: string | null;
 }
 
+export interface PublicStats {
+  qr_codes: number;
+  gs1_units: number;
+}
+
+export async function fetchPublicStats(): Promise<PublicStats | null> {
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  try {
+    const res = await fetch(`${publicUrl}/api/v1/public/stats`, { next: { revalidate: 300 } });
+    if (!res.ok) return null;
+    return (await res.json()) as PublicStats;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPromoBanners(): Promise<PromoBanner[]> {
   const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   try {

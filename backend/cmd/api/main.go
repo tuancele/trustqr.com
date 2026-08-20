@@ -134,6 +134,7 @@ func main() {
 	orders := &handlers.OrderHandler{DB: pool, Tokens: tokenSvc, Audit: audit}
 	settings := &handlers.SettingsHandler{DB: pool}
 	vouchers := &handlers.VoucherHandler{DB: pool}
+	publicStats := &handlers.PublicStatsHandler{DB: pool}
 
 	api := app.Group("/api/v1")
 
@@ -175,6 +176,9 @@ func main() {
 	api.Get("/products/:id", products.Get)
 	api.Get("/products/:id/images/:imageId/file", products.ServeImage)
 	api.Get("/companies/:id", companies.Get)
+
+	// Public marketing homepage stats (live counts, cached client-side)
+	api.Get("/public/stats", publicStats.Get)
 
 	// Public promo banners + brand logos (for verify page header)
 	api.Get("/banners", banners.PublicList)
