@@ -35,6 +35,13 @@ type LabelToken struct {
 type GridSpec struct {
 	Cols int
 	Rows int
+	// OffsetY is the vertical distance from the sheet's top edge to the first
+	// row of cells. The requested margin only sets the *minimum* usable area
+	// used to compute Rows; whatever margin is left over after fitting a
+	// whole number of rows is unused space that GridLayout splits evenly
+	// above and below the grid, so the printed sheet has equal top/bottom
+	// margins instead of all the leftover space landing at the bottom.
+	OffsetY float64
 }
 
 // SheetPresets maps a preset name to {width_mm, height_mm} in portrait orientation.
@@ -60,7 +67,9 @@ func GridLayout(sheetW, sheetH, margin, gutter, labelW, labelH float64) (GridSpe
 	if cols < 1 || rows < 1 {
 		return GridSpec{}, fmt.Errorf("label_does_not_fit: label %.0fx%.0fmm does not fit sheet %.0fx%.0fmm with %.1fmm margin", labelW, labelH, sheetW, sheetH, margin)
 	}
-	return GridSpec{Cols: cols, Rows: rows}, nil
+	contentH := float64(rows)*labelH + float64(rows-1)*gutter
+	offsetY := (sheetH - contentH) / 2
+	return GridSpec{Cols: cols, Rows: rows, OffsetY: offsetY}, nil
 }
 
 // DefaultBackgroundColor is used for RasterizeSVG's canvas and the PDF page
@@ -345,7 +354,7 @@ func addCutlinePage(pdf *fpdf.Fpdf, orientation string, sheetW, sheetH, margin, 
 	for row := 0; row < grid.Rows; row++ {
 		for col := 0; col < grid.Cols; col++ {
 			cellX := margin + float64(col)*(labelW+gutter)
-			cellY := margin + float64(row)*(labelH+gutter)
+			cellY := grid.OffsetY + float64(row)*(labelH+gutter)
 			cellTransform := rasterx.Identity.Translate(cellX, cellY).Mult(icon.Transform)
 
 			for i := range icon.SVGPaths {
@@ -453,7 +462,7 @@ func RenderTiledPDF(templateSrc io.Reader, templateType string, sheetW, sheetH, 
 		col := posInPage % grid.Cols
 		row := posInPage / grid.Cols
 		cellX := margin + float64(col)*(labelW+gutter)
-		cellY := margin + float64(row)*(labelH+gutter)
+		cellY := grid.OffsetY + float64(row)*(labelH+gutter)
 
 		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
 
@@ -655,7 +664,7 @@ func RenderTiledGS1PDF(templateSrc io.Reader, templateType string, sheetW, sheet
 		col := posInPage % grid.Cols
 		row := posInPage / grid.Cols
 		cellX := margin + float64(col)*(labelW+gutter)
-		cellY := margin + float64(row)*(labelH+gutter)
+		cellY := grid.OffsetY + float64(row)*(labelH+gutter)
 
 		pdf.ImageOptions("tpl", cellX, cellY, labelW, labelH, false, imgOpts, 0, "")
 
