@@ -401,6 +401,21 @@ const SHEET_PRESETS_MM: Record<string, [number, number]> = {
   '33x48cm': [330, 480],
 };
 
+interface PrintSettings {
+  sheet_preset: string;
+  sheet_w_mm: number;
+  sheet_h_mm: number;
+  margin_mm: number;
+  gutter_mm: number;
+  qr_px: number;
+  background_color: string;
+  include_cutline: boolean;
+  eke_thickness_mm: number;
+  eke_arm_mm: number;
+  eke_top_offset_mm: number;
+  eke_side_offset_mm: number;
+}
+
 interface TemplateOption {
   id: number;
   name: string;
@@ -408,6 +423,7 @@ interface TemplateOption {
   height_mm: number;
   file_type: 'png' | 'jpg' | 'svg';
   has_cutline: boolean;
+  print_settings: PrintSettings | null;
 }
 
 function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: number; nextSerial: number }) {
@@ -435,6 +451,8 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api<TemplateOption[]>('/api/v1/admin/templates').then((r) => {
@@ -450,6 +468,33 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
 
   useEffect(() => {
     if (tpl && !tpl.has_cutline) setIncludeCutline(false);
+  }, [tpl]);
+
+  // Auto-fill the panel from this template's saved print defaults (if any)
+  // whenever the selected template changes, so the admin doesn't have to
+  // re-enter sheet size/margin/gutter/etc every time they export this
+  // template's labels.
+  useEffect(() => {
+    const ps = tpl?.print_settings;
+    if (!ps) return;
+    if (ps.sheet_preset && SHEET_PRESETS_MM[ps.sheet_preset]) {
+      setSheetPreset(ps.sheet_preset as typeof sheetPreset);
+      setCustomW('');
+      setCustomH('');
+    } else if (ps.sheet_w_mm > 0 && ps.sheet_h_mm > 0) {
+      setSheetPreset('custom');
+      setCustomW(String(ps.sheet_w_mm / 10));
+      setCustomH(String(ps.sheet_h_mm / 10));
+    }
+    setMarginMM(ps.margin_mm);
+    setGutterMM(ps.gutter_mm);
+    setQrPx(ps.qr_px);
+    setBackgroundColor(ps.background_color);
+    setIncludeCutline(ps.include_cutline && !!tpl?.has_cutline);
+    setEkeThicknessMM(ps.eke_thickness_mm);
+    setEkeArmMM(ps.eke_arm_mm);
+    setEkeTopOffsetMM(ps.eke_top_offset_mm);
+    setEkeSideOffsetMM(ps.eke_side_offset_mm);
   }, [tpl]);
   const rangeCount = Math.max(0, toSerial - fromSerial + 1);
   // Custom width/height are entered in cm (matching the "33x48cm"-style preset
@@ -536,6 +581,62 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
       setError(e.message || 'Xuất ZIP thất bại');
     }
     setBusy(false);
+  }
+
+  async function saveAsDefault() {
+    if (!tpl) return;
+    setSaveMsg(null);
+    setSavingSettings(true);
+    try {
+      const r = await api(`/api/v1/admin/templates/${tpl.id}/print-settings`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          sheet_preset: sheetPreset === 'custom' ? '' : sheetPreset,
+          sheet_w_mm: sheetPreset === 'custom' ? customWMM : 0,
+          sheet_h_mm: sheetPreset === 'custom' ? customHMM : 0,
+          margin_mm: marginMM,
+          gutter_mm: gutterMM,
+          qr_px: qrPx,
+          background_color: backgroundColor,
+          include_cutline: includeCutline,
+          eke_thickness_mm: ekeThicknessMM,
+          eke_arm_mm: ekeArmMM,
+          eke_top_offset_mm: ekeTopOffsetMM,
+          eke_side_offset_mm: ekeSideOffsetMM,
+        }),
+      });
+      if (r.ok) {
+        setSaveMsg('Đã lưu thông số làm mặc định cho mẫu tem này.');
+        setTemplates((prev) =>
+          prev.map((t) =>
+            t.id === tpl.id
+              ? {
+                  ...t,
+                  print_settings: {
+                    sheet_preset: sheetPreset === 'custom' ? '' : sheetPreset,
+                    sheet_w_mm: sheetPreset === 'custom' ? customWMM : 0,
+                    sheet_h_mm: sheetPreset === 'custom' ? customHMM : 0,
+                    margin_mm: marginMM,
+                    gutter_mm: gutterMM,
+                    qr_px: qrPx,
+                    background_color: backgroundColor,
+                    include_cutline: includeCutline,
+                    eke_thickness_mm: ekeThicknessMM,
+                    eke_arm_mm: ekeArmMM,
+                    eke_top_offset_mm: ekeTopOffsetMM,
+                    eke_side_offset_mm: ekeSideOffsetMM,
+                  },
+                }
+              : t
+          )
+        );
+      } else {
+        setSaveMsg(r.error || 'Lưu thất bại');
+      }
+    } catch (e: any) {
+      setSaveMsg(e.message || 'Lưu thất bại');
+    }
+    setSavingSettings(false);
   }
 
   if (loadingTpl) return <Spinner />;
@@ -736,18 +837,27 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
         )}
 
         {error && <Alert kind="danger">{error}</Alert>}
+        {saveMsg && <Alert kind={saveMsg.startsWith('Đã lưu') ? 'info' : 'danger'}>{saveMsg}</Alert>}
 
-        {tpl?.file_type === 'svg' ? (
-          <button type="button" onClick={exportSVGZip} disabled={busy || rangeCount === 0} className="btn-primary">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
-            {busy ? 'Đang xuất...' : `Tải ZIP (SVG) — ${fmtNumber(rangeCount)} tem`}
-          </button>
-        ) : (
-          <button type="button" onClick={exportPDF} disabled={busy || rangeCount === 0 || !!gridError} className="btn-primary">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-            {busy ? 'Đang xuất...' : `Tải PDF — ${fmtNumber(rangeCount)} tem`}
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {tpl?.file_type === 'svg' ? (
+            <button type="button" onClick={exportSVGZip} disabled={busy || rangeCount === 0} className="btn-primary">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
+              {busy ? 'Đang xuất...' : `Tải ZIP (SVG) — ${fmtNumber(rangeCount)} tem`}
+            </button>
+          ) : (
+            <button type="button" onClick={exportPDF} disabled={busy || rangeCount === 0 || !!gridError} className="btn-primary">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+              {busy ? 'Đang xuất...' : `Tải PDF — ${fmtNumber(rangeCount)} tem`}
+            </button>
+          )}
+          {tpl && (
+            <button type="button" onClick={saveAsDefault} disabled={savingSettings} className="btn-secondary">
+              {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings2 className="w-4 h-4" />}
+              {savingSettings ? 'Đang lưu...' : 'Lưu làm mặc định cho mẫu này'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

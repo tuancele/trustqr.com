@@ -317,6 +317,7 @@ func main() {
 	protected.Get("/templates/:id", templates.Get)
 	protected.Patch("/templates/:id", templates.Update)
 	protected.Put("/templates/:id", templates.UpdateFull)
+	protected.Put("/templates/:id/print-settings", templates.SavePrintSettings)
 	protected.Delete("/templates/:id", templates.Delete)
 	protected.Get("/templates/:id/preview", templates.Preview)
 	protected.Get("/templates/:id/barcode-preview", templates.BarcodePreview)

@@ -540,6 +540,27 @@ func (t *TextObjectConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PrintSettings is a saved snapshot of the "Xuất file in tem hoàn thiện"
+// panel's field values for one label template, so an admin who has already
+// tuned the sheet size/margin/gutter/etc for a given template doesn't have
+// to re-enter them on every export. Mirrors the export-request fields in
+// gs1_label_export.go one-for-one; a nil *PrintSettings on a template just
+// means "no saved defaults yet."
+type PrintSettings struct {
+	SheetPreset     string  `json:"sheet_preset"`
+	SheetWMM        float64 `json:"sheet_w_mm"`
+	SheetHMM        float64 `json:"sheet_h_mm"`
+	MarginMM        float64 `json:"margin_mm"`
+	GutterMM        float64 `json:"gutter_mm"`
+	QRPx            int     `json:"qr_px"`
+	BackgroundColor string  `json:"background_color"`
+	IncludeCutline  bool    `json:"include_cutline"`
+	EkeThicknessMM  float64 `json:"eke_thickness_mm"`
+	EkeArmMM        float64 `json:"eke_arm_mm"`
+	EkeTopOffsetMM  float64 `json:"eke_top_offset_mm"`
+	EkeSideOffsetMM float64 `json:"eke_side_offset_mm"`
+}
+
 // GS1FieldValues supplies the resolved value for every TextObjectConfig
 // on a label. Dates are kept as time.Time rather than pre-formatted
 // strings so each positioned text object can independently choose its own

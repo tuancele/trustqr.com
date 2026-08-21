@@ -50,20 +50,22 @@ type templateRow struct {
 	BarcodeHRatio float64                     `json:"barcode_h_ratio"`
 	TextObjects   []services.TextObjectConfig `json:"text_objects"`
 	HasCutline    bool                        `json:"has_cutline"`
+	PrintSettings *services.PrintSettings     `json:"print_settings"`
 	CreatedAt     time.Time                   `json:"created_at"`
 }
 
 const templateColumns = `id, name, width_mm, height_mm, file_type, qr_x_ratio, qr_y_ratio, qr_size_ratio,
 	is_gs1, barcode_x_ratio, barcode_y_ratio, barcode_w_ratio, barcode_h_ratio, text_objects,
-	(cutline_file_path IS NOT NULL) AS has_cutline, created_at`
+	(cutline_file_path IS NOT NULL) AS has_cutline, print_settings, created_at`
 
 func scanTemplateRow(row pgx.Row) (templateRow, error) {
 	var r templateRow
 	var textObjectsRaw []byte
+	var printSettingsRaw []byte
 	err := row.Scan(&r.ID, &r.Name, &r.WidthMM, &r.HeightMM, &r.FileType,
 		&r.QRXRatio, &r.QRYRatio, &r.QRSizeRatio, &r.IsGS1,
 		&r.BarcodeXRatio, &r.BarcodeYRatio, &r.BarcodeWRatio, &r.BarcodeHRatio,
-		&textObjectsRaw, &r.HasCutline, &r.CreatedAt)
+		&textObjectsRaw, &r.HasCutline, &printSettingsRaw, &r.CreatedAt)
 	if err != nil {
 		return r, err
 	}
@@ -72,6 +74,13 @@ func scanTemplateRow(row pgx.Row) (templateRow, error) {
 		if err := json.Unmarshal(textObjectsRaw, &r.TextObjects); err != nil {
 			return r, fmt.Errorf("parse text_objects: %w", err)
 		}
+	}
+	if len(printSettingsRaw) > 0 {
+		var ps services.PrintSettings
+		if err := json.Unmarshal(printSettingsRaw, &ps); err != nil {
+			return r, fmt.Errorf("parse print_settings: %w", err)
+		}
+		r.PrintSettings = &ps
 	}
 	return r, nil
 }
@@ -435,6 +444,53 @@ func (h *TemplateHandler) Update(c *fiber.Ctx) error {
 
 	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
 	h.Audit.Log(adminID, "label_template.update", "label_template", strconv.FormatInt(id, 10),
+		fiber.Map{}, middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"success": true})
+}
+
+// -------- ADMIN: Save print-export defaults --------
+
+// SavePrintSettings persists the current "Xuất file in tem hoàn thiện" panel
+// values as this template's defaults, so the next admin exporting labels
+// from this same template has the panel pre-filled instead of starting from
+// scratch. Validation mirrors the export handler's own bounds checks.
+func (h *TemplateHandler) SavePrintSettings(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	var ps services.PrintSettings
+	if err := c.BodyParser(&ps); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
+	}
+	if ps.MarginMM < 0 || ps.GutterMM < 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "margin_gutter_negative"})
+	}
+	if ps.QRPx < 64 || ps.QRPx > 4096 {
+		return c.Status(400).JSON(fiber.Map{"error": "qr_px_out_of_range"})
+	}
+	if ps.SheetPreset == "" && (ps.SheetWMM <= 0 || ps.SheetHMM <= 0) {
+		return c.Status(400).JSON(fiber.Map{"error": "sheet_size_required"})
+	}
+
+	psJSON, err := json.Marshal(ps)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "print_settings_encode"})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	tag, err := h.DB.Exec(ctx, `UPDATE label_templates SET print_settings = $1 WHERE id = $2`, psJSON, id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if tag.RowsAffected() == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+	}
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "label_template.print_settings_save", "label_template", strconv.FormatInt(id, 10),
 		fiber.Map{}, middleware.ClientIP(c), c.Get("User-Agent"))
 	return c.JSON(fiber.Map{"success": true})
 }
