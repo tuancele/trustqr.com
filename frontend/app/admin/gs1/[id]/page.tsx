@@ -44,7 +44,7 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   svg_rasterize_failed: 'Không xử lý được file SVG của mẫu tem này.',
   quantity_too_large: 'Số lượng bản in vượt quá giới hạn cho phép.',
   qr_px_out_of_range: 'Độ phân giải QR không hợp lệ.',
-  gtin_must_be_8_to_14_digits: 'GTIN phải là số, từ 8 đến 14 chữ số.',
+  gtin_invalid_format: 'GTIN phải là số (8-14 chữ số) hoặc Primary DI Number (6-20 ký tự chữ/số).',
   manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
   expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
   lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
@@ -244,7 +244,8 @@ function EditForm({ data, onCancel, onSaved }: { data: GS1LabelDetail; onCancel:
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <EField label="GTIN (AI 01)" required>
-          <input value={form.gtin} onChange={(e) => set('gtin', e.target.value)} className="form-input font-mono" />
+          <input value={form.gtin} onChange={(e) => set('gtin', e.target.value)} className="form-input font-mono"
+            placeholder="8-14 chữ số, hoặc Primary DI Number (VD: D755FXS5007C0)" />
         </EField>
         <EField label="Ngày sản xuất (AI 11)" required>
           <input type="date" value={form.manufacture_date} onChange={(e) => set('manufacture_date', e.target.value)} className="form-input" />

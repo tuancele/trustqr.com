@@ -40,7 +40,7 @@ interface GS1Label {
 }
 
 const GS1_ERROR_LABELS: Record<string, string> = {
-  gtin_must_be_8_to_14_digits: 'GTIN phải là số, từ 8 đến 14 chữ số.',
+  gtin_invalid_format: 'GTIN phải là số (8-14 chữ số) hoặc Primary DI Number (6-20 ký tự chữ/số).',
   manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
   expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
   lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
@@ -255,7 +255,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Field label="GTIN (AI 01)" required>
           <input value={form.gtin} onChange={(e) => set('gtin', e.target.value)}
-            placeholder="08809460304701" className="form-input font-mono" />
+            placeholder="08809460304701 hoặc Primary DI: D755FXS5007C0" className="form-input font-mono" />
         </Field>
         <Field label="Ngày sản xuất (AI 11)" required>
           <input type="date" value={form.manufacture_date} onChange={(e) => set('manufacture_date', e.target.value)}
