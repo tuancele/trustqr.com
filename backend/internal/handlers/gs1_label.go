@@ -34,7 +34,7 @@ type gs1LabelReq struct {
 	ManufactureDate string `json:"manufacture_date"` // "YYYY-MM-DD"
 	ExpiryDate      string `json:"expiry_date"`      // "YYYY-MM-DD", optional
 	Lot             string `json:"lot"`              // full lot; used as-is by UpdateLabel
-	LotPrefix       string `json:"lot_prefix"`       // 3-char admin-entered prefix; CreateLabel appends 8 auto-generated chars
+	LotPrefix       string `json:"lot_prefix"`       // CreateLabel: exactly 3 chars = prefix (8 auto-generated chars appended); 4-20 chars = full lot, used as-is
 	Serial          string `json:"serial"`           // full serial; used as-is by UpdateLabel
 	SerialPrefix    string `json:"serial_prefix"`    // 3-char admin-entered prefix; CreateLabel appends 7 auto-generated chars
 	ProductName     string `json:"product_name"`
@@ -78,6 +78,11 @@ func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 // -------- Create a new manually-entered label --------
 
 var serialPrefixRe = regexp.MustCompile(`^[A-Z0-9]{3}$`)
+
+// fullLotRe matches a complete lot/batch value (AI 10) typed in full by the
+// admin instead of a 3-char prefix — e.g. "R02K81VMR6V". When it matches,
+// CreateLabel uses the value as-is and skips auto-generation.
+var fullLotRe = regexp.MustCompile(`^[A-Z0-9]{4,20}$`)
 
 const serialSuffixAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -129,15 +134,19 @@ func (h *GS1LabelHandler) CreateLabel(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid_body"})
 	}
 
-	lotPrefix := strings.ToUpper(strings.TrimSpace(req.LotPrefix))
-	if !serialPrefixRe.MatchString(lotPrefix) {
+	lotInput := strings.ToUpper(strings.TrimSpace(req.LotPrefix))
+	switch {
+	case serialPrefixRe.MatchString(lotInput):
+		lotSuffix, err := generateSerialSuffix(8)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "lot_gen_failed"})
+		}
+		req.Lot = lotInput + lotSuffix
+	case fullLotRe.MatchString(lotInput):
+		req.Lot = lotInput
+	default:
 		return c.Status(400).JSON(fiber.Map{"error": "lot_prefix_invalid"})
 	}
-	lotSuffix, err := generateSerialSuffix(8)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "lot_gen_failed"})
-	}
-	req.Lot = lotPrefix + lotSuffix
 
 	prefix := strings.ToUpper(strings.TrimSpace(req.SerialPrefix))
 	if !serialPrefixRe.MatchString(prefix) {

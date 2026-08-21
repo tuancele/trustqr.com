@@ -44,7 +44,7 @@ const GS1_ERROR_LABELS: Record<string, string> = {
   manufacture_date_invalid: 'Ngày sản xuất không hợp lệ.',
   expiry_date_invalid: 'Hạn sử dụng không hợp lệ.',
   lot_and_serial_required: 'Cần nhập Lot/Batch number và Serial number.',
-  lot_prefix_invalid: 'Tiền tố lô phải gồm đúng 3 ký tự chữ/số (A-Z, 0-9).',
+  lot_prefix_invalid: 'Lot/Batch number phải là 3 ký tự (tự sinh thêm) hoặc 4-20 ký tự chữ/số (dùng nguyên giá trị).',
   lot_gen_failed: 'Không tạo được lô, thử lại.',
   serial_prefix_invalid: 'Tiền tố serial phải gồm đúng 3 ký tự chữ/số (A-Z, 0-9).',
   serial_gen_failed: 'Không tạo được serial, thử lại.',
@@ -183,7 +183,7 @@ const emptyForm = {
   product_name: '', product_code: '', spec: '', size_spec: '', unit: '', manufacturer: '', origin_country: '',
 };
 const SERIAL_PREFIX_RE = /^[A-Z0-9]{3}$/;
-const LOT_PREFIX_RE = /^[A-Z0-9]{3}$/;
+const LOT_PREFIX_RE = /^[A-Z0-9]{3,20}$/;
 
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState(emptyForm);
@@ -221,7 +221,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     setError(null);
     setCreatedSerial(null);
     if (!form.gtin || !form.manufacture_date || !form.lot_prefix || !form.serial_prefix) {
-      setError('Cần nhập GTIN, ngày sản xuất, tiền tố lô và tiền tố serial.');
+      setError('Cần nhập GTIN, ngày sản xuất, Lot/Batch number và tiền tố serial.');
       return;
     }
     if (!LOT_PREFIX_RE.test(form.lot_prefix)) {
@@ -265,11 +265,11 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           <input type="date" value={form.expiry_date} onChange={(e) => set('expiry_date', e.target.value)}
             className="form-input" />
         </Field>
-        <Field label="Lot / Batch number (AI 10) — nhập 3 ký tự đầu" required>
+        <Field label="Lot / Batch number (AI 10) — 3 ký tự đầu hoặc nhập đầy đủ" required>
           <input value={form.lot_prefix}
-            onChange={(e) => set('lot_prefix', e.target.value.toUpperCase().slice(0, 3))}
-            placeholder="R02" maxLength={3} className="form-input font-mono uppercase" />
-          <p className="text-xs text-gray-400 mt-1">Hệ thống tự sinh thêm 8 ký tự phía sau, ví dụ: R02511110020</p>
+            onChange={(e) => set('lot_prefix', e.target.value.toUpperCase().slice(0, 20))}
+            placeholder="R02 hoặc R02K81VMR6V" maxLength={20} className="form-input font-mono uppercase" />
+          <p className="text-xs text-gray-400 mt-1">Nhập 3 ký tự (VD: R02) để hệ thống tự sinh thêm 8 ký tự phía sau, hoặc nhập đầy đủ (VD: R02K81VMR6V) để dùng nguyên giá trị đó, không tự sinh nữa.</p>
         </Field>
         <Field label="Serial number (AI 21) — nhập 3 ký tự đầu" required>
           <input value={form.serial_prefix}
