@@ -452,9 +452,15 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
     if (tpl && !tpl.has_cutline) setIncludeCutline(false);
   }, [tpl]);
   const rangeCount = Math.max(0, toSerial - fromSerial + 1);
+  // Custom width/height are entered in cm (matching the "33x48cm"-style preset
+  // buttons above), then converted to mm here to match SHEET_PRESETS_MM and
+  // what the backend expects — entering raw mm was a common source of
+  // accidentally-tiny sheets (e.g. typing "32" for 32cm produced a 32mm sheet).
+  const customWMM = Number(customW) * 10;
+  const customHMM = Number(customH) * 10;
   const sheetDims: [number, number] | null =
     sheetPreset === 'custom'
-      ? (Number(customW) > 0 && Number(customH) > 0 ? [Number(customW), Number(customH)] : null)
+      ? (customWMM > 0 && customHMM > 0 ? [customWMM, customHMM] : null)
       : SHEET_PRESETS_MM[sheetPreset];
 
   let grid: { cols: number; rows: number } | null = null;
@@ -495,8 +501,8 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
           from_serial: fromSerial,
           to_serial: toSerial,
           sheet_preset: sheetPreset === 'custom' ? '' : sheetPreset,
-          sheet_w_mm: sheetPreset === 'custom' ? Number(customW) : 0,
-          sheet_h_mm: sheetPreset === 'custom' ? Number(customH) : 0,
+          sheet_w_mm: sheetPreset === 'custom' ? customWMM : 0,
+          sheet_h_mm: sheetPreset === 'custom' ? customHMM : 0,
           margin_mm: marginMM,
           gutter_mm: gutterMM,
           qr_px: qrPx,
@@ -641,10 +647,10 @@ function PrintTab({ batchId, total, nextSerial }: { batchId: number; total: numb
               {sheetPreset === 'custom' && (
                 <div className="flex items-center gap-3 mt-2">
                   <input type="number" min={1} step="0.1" value={customW} onChange={(e) => setCustomW(e.target.value)}
-                    placeholder="Rộng (mm)" className="form-input w-32" />
+                    placeholder="Rộng (cm)" className="form-input w-32" />
                   <span className="text-gray-400">×</span>
                   <input type="number" min={1} step="0.1" value={customH} onChange={(e) => setCustomH(e.target.value)}
-                    placeholder="Cao (mm)" className="form-input w-32" />
+                    placeholder="Cao (cm)" className="form-input w-32" />
                 </div>
               )}
             </div>
