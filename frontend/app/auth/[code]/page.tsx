@@ -230,23 +230,22 @@ function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyRe
   const barColor = result.label_color || '#475569';
   return (
     <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
-      <div className="flex-shrink-0 flex items-center justify-center px-1.5">
+      <div className="w-7 flex-shrink-0 my-2 ml-1 rounded-sm flex items-center justify-center" style={{ backgroundColor: barColor }}>
         <span
-          className="text-slate-900 text-[9px] font-bold tracking-widest whitespace-nowrap"
+          className="text-white text-[9px] font-bold tracking-widest whitespace-nowrap"
           style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
         >
           SUPER LINE
         </span>
       </div>
-      <div className="w-3 flex-shrink-0 my-2 rounded-sm" style={{ backgroundColor: barColor }} />
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center">
           <div className="w-12 flex-shrink-0 flex items-center justify-center px-1 py-2">
-            <span className="text-[9px] font-bold border border-slate-700 text-slate-700 rounded px-1 leading-tight">REF</span>
+            <span className="text-[10px] font-bold border-2 border-slate-800 text-slate-800 rounded px-1.5 leading-tight">REF</span>
           </div>
           <div className="flex-1 min-w-0 flex flex-col justify-center px-2 py-2">
-            <span className="font-extrabold text-slate-900 text-lg leading-tight tracking-tight">{result.spec}</span>
-            {result.size_spec && <span className="text-[12px] text-slate-500 leading-tight break-words">{result.size_spec}</span>}
+            <span className="font-black text-slate-900 text-2xl leading-tight tracking-tight">{result.spec}</span>
+            {result.size_spec && <span className="text-[13px] text-slate-500 leading-tight break-words">{result.size_spec}</span>}
           </div>
         </div>
         {result.barcode_image && (
