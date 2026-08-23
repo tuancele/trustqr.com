@@ -230,7 +230,7 @@ function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyRe
   const barColor = result.label_color || '#475569';
   return (
     <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
-      <div className="w-7 flex-shrink-0 my-2 ml-1 rounded-sm flex items-center justify-center" style={{ backgroundColor: barColor }}>
+      <div className="w-7 flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: barColor }}>
         <span
           className="text-white text-[9px] font-bold tracking-widest whitespace-nowrap"
           style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
