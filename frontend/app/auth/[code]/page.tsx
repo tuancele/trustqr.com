@@ -230,29 +230,34 @@ function MedicalLabelStrip({ result }: { result: import('@/lib/api').GS1VerifyRe
   const barColor = result.label_color || '#475569';
   return (
     <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
-      <div className="w-6 flex-shrink-0 flex items-center justify-center py-2" style={{ backgroundColor: barColor }}>
+      <div className="flex-shrink-0 flex items-center justify-center px-1.5">
         <span
-          className="text-white text-[9px] font-bold tracking-widest whitespace-nowrap"
+          className="text-slate-900 text-[9px] font-bold tracking-widest whitespace-nowrap"
           style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
         >
           SUPER LINE
         </span>
       </div>
+      <div className="w-3 flex-shrink-0 my-2 rounded-sm" style={{ backgroundColor: barColor }} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-stretch border-b border-slate-100">
-          <div className="flex flex-col items-center justify-center gap-1 px-2 py-2 border-r border-slate-100 flex-shrink-0">
+        <div className="flex items-center">
+          <div className="w-12 flex-shrink-0 flex items-center justify-center px-1 py-2">
             <span className="text-[9px] font-bold border border-slate-700 text-slate-700 rounded px-1 leading-tight">REF</span>
-            <span className="text-[8px] text-slate-500 text-center leading-tight">S.L.A.<br />Surface</span>
           </div>
-          <div className="flex-1 min-w-0 flex flex-col justify-center px-3 py-2">
-            <span className="font-bold text-slate-900 text-sm leading-tight">{result.spec}</span>
-            {result.size_spec && <span className="text-[11px] text-slate-500 leading-tight break-words">{result.size_spec}</span>}
+          <div className="flex-1 min-w-0 flex flex-col justify-center px-2 py-2">
+            <span className="font-extrabold text-slate-900 text-lg leading-tight tracking-tight">{result.spec}</span>
+            {result.size_spec && <span className="text-[12px] text-slate-500 leading-tight break-words">{result.size_spec}</span>}
           </div>
         </div>
         {result.barcode_image && (
-          <div className="flex flex-col items-center justify-center px-3 py-2">
-            <img src={result.barcode_image} alt="Barcode" className="h-8 max-w-[65%] w-auto object-contain" />
-            {result.serial && <span className="text-[9px] font-mono text-slate-600 mt-0.5 whitespace-nowrap">{result.serial}</span>}
+          <div className="flex items-center">
+            <div className="w-12 flex-shrink-0 flex items-center justify-center px-1 py-1">
+              <span className="text-[8px] text-slate-500 text-center leading-tight">S.L.A.<br />Surface</span>
+            </div>
+            <div className="flex-1 min-w-0 flex flex-col items-center justify-center px-2 py-1.5">
+              <img src={result.barcode_image} alt="Barcode" className="h-10 max-w-[75%] w-auto object-contain" />
+              {result.serial && <span className="text-[9px] font-mono text-slate-600 mt-0.5 whitespace-nowrap">{result.serial}</span>}
+            </div>
           </div>
         )}
       </div>
