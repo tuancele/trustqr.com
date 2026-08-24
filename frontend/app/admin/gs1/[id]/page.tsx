@@ -6,11 +6,23 @@ import {
   ScanBarcode, ArrowLeft, Layers, Printer, Loader2, AlertTriangle,
   FileImage, FileArchive, Settings2, ExternalLink, XCircle,
   ListChecks, ChevronLeft, ChevronRight, CheckCircle2, Pencil, Save, X,
+  Upload, FileText, Plus,
 } from 'lucide-react';
-import { api, download, downloadPost } from '@/lib/adminApi';
+import { api, download, downloadPost, uploadForm } from '@/lib/adminApi';
 import { PageHeader, Spinner, Alert, EmptyState } from '@/components/ui';
 import { fmtDateShort, fmtDate, fmtNumber } from '@/lib/utils';
 import { BrandPicker, type Brand } from '@/components/BrandPicker';
+
+interface GS1ImageItem {
+  id: number;
+  url: string;
+}
+
+interface GS1DocumentItem {
+  id: number;
+  url: string;
+  name?: string;
+}
 
 interface GS1LabelDetail {
   id: number;
@@ -32,6 +44,8 @@ interface GS1LabelDetail {
   brand_name?: string;
   brand_website?: string;
   brand_logo_url?: string;
+  images: GS1ImageItem[];
+  documents: GS1DocumentItem[];
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -189,6 +203,171 @@ function OverviewTab({ data, imgSrc, onSaved }: { data: GS1LabelDetail; imgSrc: 
           </a>
         </div>
       </div>
+
+      <GS1LabelAssets data={data} onSaved={onSaved} />
+    </div>
+  );
+}
+
+// ============ Product photo + certification document uploads ============
+const API_URL_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+const MAX_GS1_IMAGES = 4;
+const MAX_GS1_DOCUMENTS = 4;
+
+function GS1LabelAssets({ data, onSaved }: { data: GS1LabelDetail; onSaved: () => Promise<any> }) {
+  return (
+    <div className="card p-5 space-y-5">
+      <ProductImagesManager labelId={data.id} images={data.images} onSaved={onSaved} />
+      <div className="border-t border-gray-100 pt-5">
+        <DocumentsManager labelId={data.id} documents={data.documents} onSaved={onSaved} />
+      </div>
+    </div>
+  );
+}
+
+function ProductImagesManager({ labelId, images, onSaved }: { labelId: number; images: GS1ImageItem[]; onSaved: () => Promise<any> }) {
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const slots = Math.max(0, MAX_GS1_IMAGES - images.length);
+    const toUpload = files.slice(0, slots);
+    setUploading(true);
+    setErr(null);
+    let failed = false;
+    for (const file of toUpload) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await uploadForm(`/api/v1/admin/gs1/labels/${labelId}/images`, fd);
+      if (!r.ok) { failed = true; setErr(errMsg(r.error)); break; }
+    }
+    if (files.length > slots && !failed) setErr(`Chỉ còn ${slots} chỗ trống, đã bỏ qua ${files.length - slots} ảnh.`);
+    setUploading(false);
+    await onSaved();
+    e.target.value = '';
+  }
+
+  async function handleDelete(imageId: number) {
+    if (!confirm('Xóa ảnh này?')) return;
+    setDeletingId(imageId);
+    setErr(null);
+    const r = await api(`/api/v1/admin/gs1/images/${imageId}`, { method: 'DELETE' });
+    setDeletingId(null);
+    if (r.ok) await onSaved();
+    else setErr(errMsg(r.error));
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        Ảnh sản phẩm thật ({images.length}/{MAX_GS1_IMAGES})
+      </h2>
+      {err && <Alert kind="danger">{err}</Alert>}
+      <div className="flex flex-wrap items-center gap-3">
+        {images.map((img) => (
+          <div key={img.id} className="relative w-20 h-20 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden group">
+            <img src={`${API_URL_BASE}${img.url}`} alt="" className="max-w-full max-h-full object-contain" />
+            <button
+              type="button"
+              onClick={() => handleDelete(img.id)}
+              disabled={deletingId === img.id}
+              className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center text-gray-500 hover:text-red-600 hover:border-red-300 shadow-sm"
+              title="Xóa ảnh"
+            >
+              {deletingId === img.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        ))}
+        {images.length < MAX_GS1_IMAGES && (
+          <label className="w-20 h-20 inline-flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-gov-400 hover:text-gov-500 cursor-pointer transition-colors">
+            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-5 h-5" />}
+            <span className="text-[10px]">Thêm ảnh</span>
+            <input type="file" accept=".png,.jpg,.jpeg" multiple onChange={handleUpload} className="hidden" disabled={uploading} />
+          </label>
+        )}
+      </div>
+      <p className="text-xs text-gray-400">PNG/JPG, tối đa 8MB/ảnh, tối đa {MAX_GS1_IMAGES} ảnh. Hiển thị trên trang xác minh khách hàng quét.</p>
+    </div>
+  );
+}
+
+function DocumentsManager({ labelId, documents, onSaved }: { labelId: number; documents: GS1DocumentItem[]; onSaved: () => Promise<any> }) {
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const slots = Math.max(0, MAX_GS1_DOCUMENTS - documents.length);
+    const toUpload = files.slice(0, slots);
+    setUploading(true);
+    setErr(null);
+    let failed = false;
+    for (const file of toUpload) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await uploadForm(`/api/v1/admin/gs1/labels/${labelId}/documents`, fd);
+      if (!r.ok) { failed = true; setErr(errMsg(r.error)); break; }
+    }
+    if (files.length > slots && !failed) setErr(`Chỉ còn ${slots} chỗ trống, đã bỏ qua ${files.length - slots} tài liệu.`);
+    setUploading(false);
+    await onSaved();
+    e.target.value = '';
+  }
+
+  async function handleDelete(docId: number) {
+    if (!confirm('Xóa tài liệu này?')) return;
+    setDeletingId(docId);
+    setErr(null);
+    const r = await api(`/api/v1/admin/gs1/documents/${docId}`, { method: 'DELETE' });
+    setDeletingId(null);
+    if (r.ok) await onSaved();
+    else setErr(errMsg(r.error));
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        Chứng nhận / Tài liệu (PDF) ({documents.length}/{MAX_GS1_DOCUMENTS})
+      </h2>
+      {err && <Alert kind="danger">{err}</Alert>}
+      <div className="flex flex-col gap-2">
+        {documents.map((doc) => (
+          <div key={doc.id} className="flex items-center gap-2">
+            <a
+              href={`${API_URL_BASE}${doc.url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 hover:bg-gray-100 min-w-0"
+            >
+              <FileText className="w-4 h-4 text-gov-600 flex-shrink-0" />
+              <span className="truncate">{doc.name || 'document.pdf'}</span>
+            </a>
+            <button
+              type="button"
+              onClick={() => handleDelete(doc.id)}
+              disabled={deletingId === doc.id}
+              className="w-8 h-8 flex-shrink-0 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-600 hover:border-red-300"
+              title="Xóa tài liệu"
+            >
+              {deletingId === doc.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-4 h-4" />}
+            </button>
+          </div>
+        ))}
+        {documents.length < MAX_GS1_DOCUMENTS && (
+          <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 text-sm text-gray-500 hover:border-gov-400 hover:text-gov-500 cursor-pointer transition-colors self-start">
+            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Thêm tài liệu
+            <input type="file" accept=".pdf" multiple onChange={handleUpload} className="hidden" disabled={uploading} />
+          </label>
+        )}
+      </div>
+      <p className="text-xs text-gray-400">PDF, tối đa 15MB/file, tối đa {MAX_GS1_DOCUMENTS} tài liệu — IFU, chứng nhận CE, giấy phép lưu hành, datasheet...</p>
     </div>
   );
 }

@@ -62,6 +62,12 @@ func main() {
 	if err := os.MkdirAll(cfg.ContentImageStorageDir, 0755); err != nil {
 		log.Fatalf("content image storage dir: %v", err)
 	}
+	if err := os.MkdirAll(cfg.GS1ProductImageStorageDir, 0755); err != nil {
+		log.Fatalf("gs1 product image storage dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.GS1DocumentStorageDir, 0755); err != nil {
+		log.Fatalf("gs1 document storage dir: %v", err)
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName:            "trustqr-api",
@@ -126,7 +132,7 @@ func main() {
 	templates := &handlers.TemplateHandler{DB: pool, Audit: audit, StorageDir: cfg.TemplateStorageDir}
 	labelExport := &handlers.LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
 	adminUsers := &handlers.AdminUserHandler{DB: pool, Auth: authSvc, Audit: audit}
-	gs1Label := &handlers.GS1LabelHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL}
+	gs1Label := &handlers.GS1LabelHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL, Audit: audit, ProductImageStorageDir: cfg.GS1ProductImageStorageDir, DocumentStorageDir: cfg.GS1DocumentStorageDir}
 	gs1LabelExport := &handlers.GS1LabelExportHandler{DB: pool, PublicBaseURL: cfg.PublicBaseURL, Tokens: tokenSvc}
 	gs1Verify := &handlers.GS1VerifyHandler{DB: pool, Redis: rdb, Tokens: tokenSvc, Geo: geo}
 	gs1SizeSpecs := &handlers.GS1SizeSpecHandler{DB: pool, Audit: audit}
@@ -185,6 +191,8 @@ func main() {
 	api.Get("/banners/:id/file", banners.ServeImage)
 	api.Get("/brands/:id/logo/file", brands.ServeLogo)
 	api.Get("/content-images/:filename", contentImages.Serve)
+	api.Get("/gs1/images/:imageId/file", gs1Label.ServeProductImage)
+	api.Get("/gs1/documents/:docId/file", gs1Label.ServeDocument)
 
 	// Customer NĐ13 endpoints
 	api.Post("/customer/deletion-request",
@@ -250,6 +258,10 @@ func main() {
 	protected.Get("/gs1/labels/:id/units", gs1Label.ListUnits)
 	protected.Get("/gs1/units/:id/qr.png", gs1Label.GetUnitQRImage)
 	protected.Delete("/gs1/labels/:id", gs1Label.DeleteLabel)
+	protected.Post("/gs1/labels/:id/images", gs1Label.AddProductImage)
+	protected.Delete("/gs1/images/:imageId", gs1Label.DeleteProductImage)
+	protected.Post("/gs1/labels/:id/documents", gs1Label.AddDocument)
+	protected.Delete("/gs1/documents/:docId", gs1Label.DeleteDocument)
 	protected.Post("/gs1/labels/:id/export-labels.pdf", gs1LabelExport.ExportPDF)
 	protected.Post("/gs1/labels/:id/export-labels-svg.zip", gs1LabelExport.ExportSVGZip)
 	protected.Get("/gs1/size-specs", gs1SizeSpecs.List)

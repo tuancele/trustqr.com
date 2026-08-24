@@ -1,5 +1,5 @@
 import { headers } from 'next/headers';
-import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock, Smartphone } from 'lucide-react';
+import { ShieldCheck, ShieldX, ShieldAlert, Hash, Calendar, Factory, MapPin, Tag, Layers, Package as PackageIcon, Repeat, Clock, Smartphone, FileText, Download } from 'lucide-react';
 import { verifyGS1Code, isAdminSession } from '@/lib/api';
 import { isMobileUA } from '@/lib/utils';
 import { CopySecurityCode } from '@/components/CopySecurityCode';
@@ -7,6 +7,7 @@ import { GtinHelp } from '@/components/GtinHelp';
 import { ScanCountHelp } from '@/components/ScanCountHelp';
 import { BuyMoreButton } from '@/components/BuyMoreModal';
 import { GS1VoucherBadge } from '@/components/GS1VoucherBadge';
+import { ImageSlider } from '@/components/ImageSlider';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -111,6 +112,7 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
 
         <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
           <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Product Information</h2>
+          {result.images && result.images.length > 0 && <ImageSlider images={result.images} />}
           <InfoRow icon={PackageIcon} label="Product Name" value={result.product_name || '—'} />
           {result.product_code && <InfoRow icon={Hash} label="Product Code" value={result.product_code} />}
           {result.spec && <InfoRow icon={Layers} label="Specification" value={result.spec} />}
@@ -141,6 +143,30 @@ export default async function GS1AuthPage({ params }: { params: { code: string }
           <InfoRow icon={Calendar} label="Manufacture Date" value={fmtDateEN(result.manufacture_date)} />
           {result.expiry_date && <InfoRow icon={Calendar} label="Expiry Date" value={fmtDateEN(result.expiry_date)} />}
         </div>
+
+        {result.documents && result.documents.length > 0 && (
+          <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
+            <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Certification &amp; Documents</h2>
+            {result.documents.map((doc) => (
+              <a
+                key={doc.id}
+                href={doc.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-slate-200 hover:border-gov-300 hover:bg-gov-50 transition-colors p-3"
+              >
+                <div className="w-9 h-9 rounded-lg bg-gov-100 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-4.5 h-4.5 text-gov-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{doc.name || 'Product Documentation'}</p>
+                  <p className="text-xs text-slate-500">IFU / Certification — tap to view or download</p>
+                </div>
+                <Download className="w-4 h-4 text-slate-400 flex-shrink-0" />
+              </a>
+            ))}
+          </div>
+        )}
 
         <div className="card mt-4 p-5 space-y-3 bg-white rounded-2xl border border-gov-100 shadow-sm">
           <h2 className="text-sm font-semibold text-gov-600 uppercase tracking-wide">Scan History</h2>

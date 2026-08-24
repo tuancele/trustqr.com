@@ -58,31 +58,33 @@ type gs1VerifyReq struct {
 }
 
 type gs1VerifyResp struct {
-	Valid           bool    `json:"valid"`
-	GTIN            string  `json:"gtin,omitempty"`
-	Lot             string  `json:"lot,omitempty"`
-	Serial          string  `json:"serial,omitempty"`
-	ManufactureDate string  `json:"manufacture_date,omitempty"`
-	ExpiryDate      string  `json:"expiry_date,omitempty"`
-	ProductName     string  `json:"product_name,omitempty"`
-	ProductCode     string  `json:"product_code,omitempty"`
-	Spec            string  `json:"spec,omitempty"`
-	SizeSpec        string  `json:"size_spec,omitempty"`
-	LabelColor      string  `json:"label_color,omitempty"`
-	BarcodeImage    string  `json:"barcode_image,omitempty"`
-	Unit            string  `json:"unit,omitempty"`
-	Manufacturer    string  `json:"manufacturer,omitempty"`
-	OriginCountry   string  `json:"origin_country,omitempty"`
-	BrandID         *int64  `json:"brand_id,omitempty"`
-	BrandName       string  `json:"brand_name,omitempty"`
-	BrandWebsite    string  `json:"brand_website,omitempty"`
-	BrandLogoURL    string  `json:"brand_logo_url,omitempty"`
-	ScanCount       int     `json:"scan_count"`
-	IsFirstScan     bool    `json:"is_first_scan"`
-	FirstScannedAt  *string `json:"first_scanned_at,omitempty"`
-	FirstScanCity   string  `json:"first_scan_city,omitempty"`
-	Warning         string  `json:"warning,omitempty"`
-	Locked          bool    `json:"locked,omitempty"`
+	Valid           bool              `json:"valid"`
+	GTIN            string            `json:"gtin,omitempty"`
+	Lot             string            `json:"lot,omitempty"`
+	Serial          string            `json:"serial,omitempty"`
+	ManufactureDate string            `json:"manufacture_date,omitempty"`
+	ExpiryDate      string            `json:"expiry_date,omitempty"`
+	ProductName     string            `json:"product_name,omitempty"`
+	ProductCode     string            `json:"product_code,omitempty"`
+	Spec            string            `json:"spec,omitempty"`
+	SizeSpec        string            `json:"size_spec,omitempty"`
+	LabelColor      string            `json:"label_color,omitempty"`
+	BarcodeImage    string            `json:"barcode_image,omitempty"`
+	Unit            string            `json:"unit,omitempty"`
+	Manufacturer    string            `json:"manufacturer,omitempty"`
+	OriginCountry   string            `json:"origin_country,omitempty"`
+	BrandID         *int64            `json:"brand_id,omitempty"`
+	BrandName       string            `json:"brand_name,omitempty"`
+	BrandWebsite    string            `json:"brand_website,omitempty"`
+	BrandLogoURL    string            `json:"brand_logo_url,omitempty"`
+	Images          []gs1ImageItem    `json:"images"`
+	Documents       []gs1DocumentItem `json:"documents"`
+	ScanCount       int               `json:"scan_count"`
+	IsFirstScan     bool              `json:"is_first_scan"`
+	FirstScannedAt  *string           `json:"first_scanned_at,omitempty"`
+	FirstScanCity   string            `json:"first_scan_city,omitempty"`
+	Warning         string            `json:"warning,omitempty"`
+	Locked          bool              `json:"locked,omitempty"`
 }
 
 func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
@@ -163,6 +165,15 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "internal"})
 	}
 
+	images, err := loadGS1Images(ctx, h.DB, labelID)
+	if err != nil {
+		images = []gs1ImageItem{}
+	}
+	documents, err := loadGS1Documents(ctx, h.DB, labelID)
+	if err != nil {
+		documents = []gs1DocumentItem{}
+	}
+
 	go func() {
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -195,6 +206,8 @@ func (h *GS1VerifyHandler) Verify(c *fiber.Ctx) error {
 		Lot:             lot,
 		Serial:          serial,
 		ManufactureDate: manufactureDate.Format("2006-01-02"),
+		Images:          images,
+		Documents:       documents,
 		ScanCount:       scanCount,
 		IsFirstScan:     scanCount == 1,
 		FirstScanCity:   firstScanCity,

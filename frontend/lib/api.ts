@@ -136,6 +136,17 @@ export async function fetchPromoBanners(): Promise<PromoBanner[]> {
   } catch { return []; }
 }
 
+export interface GS1ImageItem {
+  id: number;
+  url: string;
+}
+
+export interface GS1DocumentItem {
+  id: number;
+  url: string;
+  name?: string;
+}
+
 export interface GS1VerifyResult {
   valid: boolean;
   gtin?: string;
@@ -156,6 +167,8 @@ export interface GS1VerifyResult {
   brand_name?: string;
   brand_website?: string;
   brand_logo_url?: string;
+  images?: GS1ImageItem[];
+  documents?: GS1DocumentItem[];
   scan_count: number;
   is_first_scan: boolean;
   first_scanned_at?: string;
@@ -178,10 +191,10 @@ export async function verifyGS1Code(code: string, ip?: string): Promise<GS1Verif
     if (res.status === 404) return { valid: false, scan_count: 0, is_first_scan: false };
     if (!res.ok) return null;
     const data = (await res.json()) as GS1VerifyResult;
-    if (data.brand_logo_url) {
-      const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-      data.brand_logo_url = `${publicUrl}${data.brand_logo_url}`;
-    }
+    const publicUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    if (data.brand_logo_url) data.brand_logo_url = `${publicUrl}${data.brand_logo_url}`;
+    if (data.images) data.images = data.images.map((img) => ({ ...img, url: `${publicUrl}${img.url}` }));
+    if (data.documents) data.documents = data.documents.map((doc) => ({ ...doc, url: `${publicUrl}${doc.url}` }));
     return data;
   } catch (e) {
     console.error('verifyGS1Code error:', e);

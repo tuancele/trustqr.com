@@ -89,13 +89,45 @@ func nullIfEmptyString(s string) any {
 	return s
 }
 
+const maxUploadDocBytes = 15 * 1024 * 1024
+
+// readAndValidatePDF reads an uploaded file, enforcing a size cap and
+// confirming it's a genuine PDF via its magic-number header, so the module
+// can't end up serving an arbitrary renamed file to consumers as a "document".
+func readAndValidatePDF(fh *multipart.FileHeader) ([]byte, error) {
+	if fh.Size <= 0 || fh.Size > maxUploadDocBytes {
+		return nil, errFileTooLarge
+	}
+	if strings.ToLower(filepath.Ext(fh.Filename)) != ".pdf" {
+		return nil, errUnsupportedFileType
+	}
+	src, err := fh.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	data, err := io.ReadAll(io.LimitReader(src, maxUploadDocBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxUploadDocBytes {
+		return nil, errFileTooLarge
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF-")) {
+		return nil, errInvalidPDF
+	}
+	return data, nil
+}
+
 type uploadError string
 
 func (e uploadError) Error() string { return string(e) }
 
 const (
-	errFileTooLarge uploadError = "file_too_large"
-	errInvalidPNG   uploadError = "invalid_png"
-	errInvalidJPEG  uploadError = "invalid_jpeg"
-	errCMYKJPEG     uploadError = "cmyk_jpeg_unsupported"
+	errFileTooLarge        uploadError = "file_too_large"
+	errInvalidPNG          uploadError = "invalid_png"
+	errInvalidJPEG         uploadError = "invalid_jpeg"
+	errCMYKJPEG            uploadError = "cmyk_jpeg_unsupported"
+	errUnsupportedFileType uploadError = "unsupported_file_type"
+	errInvalidPDF          uploadError = "invalid_pdf"
 )

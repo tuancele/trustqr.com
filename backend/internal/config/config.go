@@ -27,6 +27,8 @@ type Config struct {
 	BrandLogoStorageDir string
 	PromoBannerStorageDir string
 	ContentImageStorageDir string
+	GS1ProductImageStorageDir string
+	GS1DocumentStorageDir string
 }
 
 func Load() *Config {
@@ -53,6 +55,8 @@ func Load() *Config {
 		BrandLogoStorageDir: env("BRAND_LOGO_STORAGE_DIR", "./storage/brand-logos"),
 		PromoBannerStorageDir: env("PROMO_BANNER_STORAGE_DIR", "./storage/banners"),
 		ContentImageStorageDir: env("CONTENT_IMAGE_STORAGE_DIR", "./storage/content-images"),
+		GS1ProductImageStorageDir: env("GS1_PRODUCT_IMAGE_STORAGE_DIR", "./storage/gs1-product-images"),
+		GS1DocumentStorageDir: env("GS1_DOCUMENT_STORAGE_DIR", "./storage/gs1-documents"),
 	}
 
 	if c.QRHMACSecret == "" {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"trustqr/backend/internal/middleware"
 	"trustqr/backend/internal/services"
 )
 
@@ -25,8 +27,11 @@ import (
 // lot DEFINITION — individual verify codes for physical printed stickers
 // live in gs1_label_units, generated at export time (see gs1_label_export.go).
 type GS1LabelHandler struct {
-	DB            *pgxpool.Pool
-	PublicBaseURL string
+	DB                     *pgxpool.Pool
+	PublicBaseURL          string
+	ProductImageStorageDir string
+	DocumentStorageDir     string
+	Audit                  *services.AuditLogger
 }
 
 type gs1LabelReq struct {
@@ -63,7 +68,28 @@ type gs1LabelRow struct {
 	OriginCountry   *string    `json:"origin_country"`
 	BrandID         *int64     `json:"brand_id"`
 	CreatedAt       time.Time  `json:"created_at"`
+
+	Images    []gs1ImageItem    `json:"images"`
+	Documents []gs1DocumentItem `json:"documents"`
 }
+
+// gs1ImageItem/gs1DocumentItem represent one row each in the gs1_label_images
+// / gs1_label_documents child tables — a label may have up to maxGS1Images
+// photos and maxGS1Documents certification files, each independently
+// addable/removable from the admin UI.
+type gs1ImageItem struct {
+	ID  int64  `json:"id"`
+	URL string `json:"url"`
+}
+
+type gs1DocumentItem struct {
+	ID   int64  `json:"id"`
+	URL  string `json:"url"`
+	Name string `json:"name,omitempty"`
+}
+
+const maxGS1Images = 4
+const maxGS1Documents = 4
 
 const gs1LabelColumns = `id, gtin, manufacture_date, expiry_date, lot, serial,
 	product_name, product_code, spec, size_spec, unit, manufacturer, origin_country, brand_id, created_at`
@@ -72,7 +98,90 @@ func scanGS1LabelRow(row pgx.Row) (gs1LabelRow, error) {
 	var r gs1LabelRow
 	err := row.Scan(&r.ID, &r.GTIN, &r.ManufactureDate, &r.ExpiryDate, &r.Lot, &r.Serial,
 		&r.ProductName, &r.ProductCode, &r.Spec, &r.SizeSpec, &r.Unit, &r.Manufacturer, &r.OriginCountry, &r.BrandID, &r.CreatedAt)
+	r.Images = []gs1ImageItem{}
+	r.Documents = []gs1DocumentItem{}
 	return r, err
+}
+
+func loadGS1Images(ctx context.Context, db *pgxpool.Pool, labelID int64) ([]gs1ImageItem, error) {
+	rows, err := db.Query(ctx, `SELECT id FROM gs1_label_images WHERE label_id = $1 ORDER BY sort_order, id`, labelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []gs1ImageItem{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		items = append(items, gs1ImageItem{ID: id, URL: fmt.Sprintf("/api/v1/gs1/images/%d/file", id)})
+	}
+	return items, nil
+}
+
+func loadGS1Documents(ctx context.Context, db *pgxpool.Pool, labelID int64) ([]gs1DocumentItem, error) {
+	rows, err := db.Query(ctx, `SELECT id, file_name FROM gs1_label_documents WHERE label_id = $1 ORDER BY sort_order, id`, labelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []gs1DocumentItem{}
+	for rows.Next() {
+		var id int64
+		var name *string
+		if err := rows.Scan(&id, &name); err != nil {
+			continue
+		}
+		item := gs1DocumentItem{ID: id, URL: fmt.Sprintf("/api/v1/gs1/documents/%d/file", id)}
+		if name != nil {
+			item.Name = *name
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// loadGS1AssetsForLabels batch-fetches images/documents for a page of labels
+// (ListLabels) so that showing N rows doesn't cost 2N extra queries.
+func loadGS1AssetsForLabels(ctx context.Context, db *pgxpool.Pool, labelIDs []int64) (map[int64][]gs1ImageItem, map[int64][]gs1DocumentItem, error) {
+	images := map[int64][]gs1ImageItem{}
+	docs := map[int64][]gs1DocumentItem{}
+	if len(labelIDs) == 0 {
+		return images, docs, nil
+	}
+	rows, err := db.Query(ctx, `SELECT id, label_id FROM gs1_label_images WHERE label_id = ANY($1) ORDER BY sort_order, id`, labelIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows.Next() {
+		var id, labelID int64
+		if err := rows.Scan(&id, &labelID); err != nil {
+			continue
+		}
+		images[labelID] = append(images[labelID], gs1ImageItem{ID: id, URL: fmt.Sprintf("/api/v1/gs1/images/%d/file", id)})
+	}
+	rows.Close()
+
+	rows2, err := db.Query(ctx, `SELECT id, label_id, file_name FROM gs1_label_documents WHERE label_id = ANY($1) ORDER BY sort_order, id`, labelIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows2.Next() {
+		var id, labelID int64
+		var name *string
+		if err := rows2.Scan(&id, &labelID, &name); err != nil {
+			continue
+		}
+		item := gs1DocumentItem{ID: id, URL: fmt.Sprintf("/api/v1/gs1/documents/%d/file", id)}
+		if name != nil {
+			item.Name = *name
+		}
+		docs[labelID] = append(docs[labelID], item)
+	}
+	rows2.Close()
+
+	return images, docs, nil
 }
 
 // -------- Create a new manually-entered label --------
@@ -216,6 +325,8 @@ func (h *GS1LabelHandler) UpdateLabel(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
+	r.Images, _ = loadGS1Images(ctx, h.DB, r.ID)
+	r.Documents, _ = loadGS1Documents(ctx, h.DB, r.ID)
 	return c.JSON(r)
 }
 
@@ -259,6 +370,25 @@ func (h *GS1LabelHandler) ListLabels(c *fiber.Ctx) error {
 			items = append(items, r)
 		}
 	}
+	rows.Close()
+
+	ids := make([]int64, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	images, docs, err := loadGS1AssetsForLabels(ctx, h.DB, ids)
+	if err == nil {
+		for i := range items {
+			items[i].Images = images[items[i].ID]
+			items[i].Documents = docs[items[i].ID]
+			if items[i].Images == nil {
+				items[i].Images = []gs1ImageItem{}
+			}
+			if items[i].Documents == nil {
+				items[i].Documents = []gs1DocumentItem{}
+			}
+		}
+	}
 	return c.JSON(fiber.Map{"items": items, "total": total, "page": page, "page_size": pageSize})
 }
 
@@ -288,6 +418,8 @@ func (h *GS1LabelHandler) GetLabel(c *fiber.Ctx) error {
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
+	r.Images, _ = loadGS1Images(ctx, h.DB, r.ID)
+	r.Documents, _ = loadGS1Documents(ctx, h.DB, r.ID)
 
 	fields := services.GS1Fields{GTIN: r.GTIN, ManufactureDate: r.ManufactureDate, Lot: r.Lot, Serial: r.Serial}
 	if r.ExpiryDate != nil {
@@ -419,12 +551,286 @@ func (h *GS1LabelHandler) DeleteLabel(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
-	tag, err := h.DB.Exec(ctx, "DELETE FROM gs1_labels WHERE id = $1", id)
+	// Files aren't stored in the DB, so grab every child row's path before
+	// the label delete cascades them away, then remove the files from disk.
+	var imagePaths []string
+	imgRows, err := h.DB.Query(ctx, `SELECT image_path FROM gs1_label_images WHERE label_id = $1`, id)
+	if err == nil {
+		for imgRows.Next() {
+			var p string
+			if imgRows.Scan(&p) == nil {
+				imagePaths = append(imagePaths, p)
+			}
+		}
+		imgRows.Close()
+	}
+	var docPaths []string
+	docRows, err := h.DB.Query(ctx, `SELECT document_path FROM gs1_label_documents WHERE label_id = $1`, id)
+	if err == nil {
+		for docRows.Next() {
+			var p string
+			if docRows.Scan(&p) == nil {
+				docPaths = append(docPaths, p)
+			}
+		}
+		docRows.Close()
+	}
+
+	ct, err := h.DB.Exec(ctx, `DELETE FROM gs1_labels WHERE id = $1`, id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "db"})
 	}
-	if tag.RowsAffected() == 0 {
+	if ct.RowsAffected() == 0 {
 		return c.Status(404).JSON(fiber.Map{"error": "not_found"})
 	}
+	for _, p := range imagePaths {
+		_ = os.Remove(p)
+	}
+	for _, p := range docPaths {
+		_ = os.Remove(p)
+	}
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// -------- ADMIN: Add a product photo (up to maxGS1Images per label) --------
+
+func (h *GS1LabelHandler) AddProductImage(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+
+	var exists bool
+	if err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gs1_labels WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if !exists {
+		return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+	}
+
+	var count int
+	if err := h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM gs1_label_images WHERE label_id = $1`, id).Scan(&count); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if count >= maxGS1Images {
+		return c.Status(400).JSON(fiber.Map{"error": "max_images_reached"})
+	}
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "file_required"})
+	}
+	fileType := detectImageFileType(fh.Filename)
+	if fileType == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "unsupported_file_type"})
+	}
+	data, err := readAndValidateImage(fh, fileType)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+	fullPath, err := saveImageFile(h.ProductImageStorageDir, fileType, data)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "file_write"})
+	}
+
+	var newID int64
+	err = h.DB.QueryRow(ctx, `
+		INSERT INTO gs1_label_images (label_id, image_path, file_type, sort_order)
+		VALUES ($1, $2, $3, $4) RETURNING id
+	`, id, fullPath, fileType, count).Scan(&newID)
+	if err != nil {
+		_ = os.Remove(fullPath)
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "gs1_label.product_image.add", "gs1_label", strconv.FormatInt(id, 10), nil,
+		middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(gs1ImageItem{ID: newID, URL: fmt.Sprintf("/api/v1/gs1/images/%d/file", newID)})
+}
+
+// -------- ADMIN: Delete one product photo by its own ID --------
+
+func (h *GS1LabelHandler) DeleteProductImage(c *fiber.Ctx) error {
+	imgID, err := strconv.ParseInt(c.Params("imageId"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	var path string
+	var labelID int64
+	err = h.DB.QueryRow(ctx, `DELETE FROM gs1_label_images WHERE id = $1 RETURNING image_path, label_id`, imgID).
+		Scan(&path, &labelID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	_ = os.Remove(path)
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "gs1_label.product_image.delete", "gs1_label", strconv.FormatInt(labelID, 10), nil,
+		middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// -------- PUBLIC: Serve one product photo by its own ID --------
+
+func (h *GS1LabelHandler) ServeProductImage(c *fiber.Ctx) error {
+	imgID, err := strconv.ParseInt(c.Params("imageId"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+	defer cancel()
+
+	var filePath, fileType string
+	err = h.DB.QueryRow(ctx, `SELECT image_path, file_type FROM gs1_label_images WHERE id = $1`, imgID).
+		Scan(&filePath, &fileType)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "file_read"})
+	}
+
+	switch fileType {
+	case "png":
+		c.Set("Content-Type", "image/png")
+	case "jpg":
+		c.Set("Content-Type", "image/jpeg")
+	}
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("Cache-Control", "public, max-age=86400")
+	return c.Send(data)
+}
+
+// -------- ADMIN: Add a certification/document PDF (up to maxGS1Documents per label) --------
+
+func (h *GS1LabelHandler) AddDocument(c *fiber.Ctx) error {
+	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+
+	var exists bool
+	if err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gs1_labels WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if !exists {
+		return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+	}
+
+	var count int
+	if err := h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM gs1_label_documents WHERE label_id = $1`, id).Scan(&count); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if count >= maxGS1Documents {
+		return c.Status(400).JSON(fiber.Map{"error": "max_documents_reached"})
+	}
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "file_required"})
+	}
+	data, err := readAndValidatePDF(fh)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+	fullPath, err := saveImageFile(h.DocumentStorageDir, "pdf", data)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "file_write"})
+	}
+
+	var newID int64
+	err = h.DB.QueryRow(ctx, `
+		INSERT INTO gs1_label_documents (label_id, document_path, file_name, sort_order)
+		VALUES ($1, $2, $3, $4) RETURNING id
+	`, id, fullPath, fh.Filename, count).Scan(&newID)
+	if err != nil {
+		_ = os.Remove(fullPath)
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "gs1_label.document.add", "gs1_label", strconv.FormatInt(id, 10), nil,
+		middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(gs1DocumentItem{ID: newID, URL: fmt.Sprintf("/api/v1/gs1/documents/%d/file", newID), Name: fh.Filename})
+}
+
+// -------- ADMIN: Delete one document by its own ID --------
+
+func (h *GS1LabelHandler) DeleteDocument(c *fiber.Ctx) error {
+	docID, err := strconv.ParseInt(c.Params("docId"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	var path string
+	var labelID int64
+	err = h.DB.QueryRow(ctx, `DELETE FROM gs1_label_documents WHERE id = $1 RETURNING document_path, label_id`, docID).
+		Scan(&path, &labelID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	_ = os.Remove(path)
+
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "gs1_label.document.delete", "gs1_label", strconv.FormatInt(labelID, 10), nil,
+		middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// -------- PUBLIC: Serve one document by its own ID --------
+
+func (h *GS1LabelHandler) ServeDocument(c *fiber.Ctx) error {
+	docID, err := strconv.ParseInt(c.Params("docId"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+	defer cancel()
+
+	var filePath string
+	var fileName *string
+	err = h.DB.QueryRow(ctx, `SELECT document_path, file_name FROM gs1_label_documents WHERE id = $1`, docID).
+		Scan(&filePath, &fileName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "file_read"})
+	}
+
+	name := "document.pdf"
+	if fileName != nil && *fileName != "" {
+		name = *fileName
+	}
+	c.Set("Content-Type", "application/pdf")
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("Cache-Control", "public, max-age=86400")
+	c.Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, name))
+	return c.Send(data)
 }
