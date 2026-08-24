@@ -38,16 +38,10 @@ func RateLimit(rdb *redis.Client, name string, max int, window time.Duration, ke
 	}
 }
 
-// ClientIP extracts the real client IP, respecting X-Forwarded-For.
+// ClientIP extracts the real client IP. Fiber's c.IP() only reads the
+// X-Forwarded-For header when the immediate TCP peer is a trusted proxy
+// (see EnableTrustedProxyCheck/TrustedProxies in cmd/api/main.go) — for any
+// other caller it returns the raw socket address, which can't be spoofed.
 func ClientIP(c *fiber.Ctx) string {
-	if xff := c.Get("X-Forwarded-For"); xff != "" {
-		// Take first IP in list
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
-		}
-		return xff
-	}
 	return c.IP()
 }

@@ -114,7 +114,7 @@ func (h *AdminUserHandler) Create(c *fiber.Ctx) error {
 
 	var id int64
 	err = h.DB.QueryRow(ctx, `
-		INSERT INTO admin_users (email, password_hash) VALUES ($1, $2) RETURNING id
+		INSERT INTO admin_users (email, password_hash, totp_enabled) VALUES ($1, $2, FALSE) RETURNING id
 	`, email, hash).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
@@ -180,7 +180,10 @@ func (h *AdminUserHandler) Update(c *fiber.Ctx) error {
 		}
 	}
 	if b.Reset2FA {
-		if _, err := h.DB.Exec(ctx, `UPDATE admin_users SET totp_secret='', totp_enabled=TRUE WHERE id=$1`, id); err != nil {
+		// Clears the secret AND turns the toggle off — leaving it TRUE with an
+		// empty secret is the exact inconsistent state that hid the "Enable 2FA"
+		// button on account creation (see migration 035).
+		if _, err := h.DB.Exec(ctx, `UPDATE admin_users SET totp_secret='', totp_enabled=FALSE WHERE id=$1`, id); err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "db"})
 		}
 	}

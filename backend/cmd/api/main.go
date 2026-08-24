@@ -77,7 +77,13 @@ func main() {
 		DisableKeepalive:   false,
 		ProxyHeader:        "X-Forwarded-For",
 		EnableIPValidation: true,
-		BodyLimit:          20 * 1024 * 1024,
+		// Only trust X-Forwarded-For when the TCP connection itself comes from
+		// our own nginx (127.0.0.1) — otherwise any direct client could forge
+		// the header and forge their way past every IP-based rate limit,
+		// account-lockout check, and audit/scan-log IP field in the app.
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          []string{"127.0.0.1", "::1"},
+		BodyLimit:               20 * 1024 * 1024,
 	})
 
 	app.Use(recover.New())
@@ -211,8 +217,14 @@ func main() {
 		appmw.RateLimit(rdb, "admin_login_ip", 5, 15*time.Minute, appmw.ClientIP),
 		auth.Login,
 	)
-	adminGroup.Post("/auth/2fa", auth.Verify2FA)
-	adminGroup.Post("/auth/refresh", auth.Refresh)
+	adminGroup.Post("/auth/2fa",
+		appmw.RateLimit(rdb, "admin_2fa_ip", 10, 15*time.Minute, appmw.ClientIP),
+		auth.Verify2FA,
+	)
+	adminGroup.Post("/auth/refresh",
+		appmw.RateLimit(rdb, "admin_refresh_ip", 30, 15*time.Minute, appmw.ClientIP),
+		auth.Refresh,
+	)
 
 	// Protected admin routes
 	protected := adminGroup.Group("", appmw.RequireAccessToken(authSvc))

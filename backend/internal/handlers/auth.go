@@ -91,12 +91,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "issue_refresh"})
 		}
-		ip := ""
-		if xff := c.Get("X-Forwarded-For"); xff != "" {
-			ip = xff
-		} else {
-			ip = c.IP()
-		}
+		ip := middleware.ClientIP(c)
 		_, _ = h.DB.Exec(ctx, `UPDATE admin_users SET last_login_at=NOW(), last_login_ip=NULLIF($1,'')::inet WHERE id=$2`, ip, id)
 		return c.JSON(loginResp{
 			AccessToken:  access,
@@ -138,16 +133,33 @@ func (h *AuthHandler) Verify2FA(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
-	var totpSecret string
-	err = h.DB.QueryRow(ctx, `SELECT totp_secret FROM admin_users WHERE id=$1`, claims.AdminID).Scan(&totpSecret)
+	var (
+		totpSecret     string
+		failedAttempts int
+		lockedUntil    *time.Time
+	)
+	err = h.DB.QueryRow(ctx, `SELECT totp_secret, failed_attempts, locked_until FROM admin_users WHERE id=$1`, claims.AdminID).
+		Scan(&totpSecret, &failedAttempts, &lockedUntil)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{"error": "user_not_found"})
 		}
 		return c.Status(500).JSON(fiber.Map{"error": "db_error"})
 	}
+	// Same lockout the password step uses — otherwise a stolen/guessed temp_token
+	// gives an attacker unlimited attempts at the 6-digit TOTP code.
+	if lockedUntil != nil && lockedUntil.After(time.Now()) {
+		return c.Status(423).JSON(fiber.Map{"error": "account_locked", "until": lockedUntil})
+	}
 
 	if !h.Auth.VerifyTOTP(totpSecret, req.Code) {
+		newAttempts := failedAttempts + 1
+		if newAttempts >= 5 {
+			until := time.Now().Add(15 * time.Minute)
+			_, _ = h.DB.Exec(ctx, `UPDATE admin_users SET failed_attempts=$1, locked_until=$2 WHERE id=$3`, newAttempts, until, claims.AdminID)
+		} else {
+			_, _ = h.DB.Exec(ctx, `UPDATE admin_users SET failed_attempts=$1 WHERE id=$2`, newAttempts, claims.AdminID)
+		}
 		return c.Status(401).JSON(fiber.Map{"error": "invalid_totp"})
 	}
 
@@ -161,7 +173,7 @@ func (h *AuthHandler) Verify2FA(c *fiber.Ctx) error {
 	}
 
 	ip := middleware.ClientIP(c)
-	_, _ = h.DB.Exec(ctx, `UPDATE admin_users SET last_login_at=NOW(), last_login_ip=$1 WHERE id=$2`, nullIfEmpty(ip), claims.AdminID)
+	_, _ = h.DB.Exec(ctx, `UPDATE admin_users SET last_login_at=NOW(), last_login_ip=$1, failed_attempts=0, locked_until=NULL WHERE id=$2`, nullIfEmpty(ip), claims.AdminID)
 
 	return c.JSON(tokenPair{
 		AccessToken:  access,
