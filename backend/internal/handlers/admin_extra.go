@@ -105,37 +105,67 @@ func (h *AdminExtraHandler) DisableToken(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"disabled": true})
 }
 
+// -------- GS1 unit disable (parity with QR token disable) --------
+
+func (h *AdminExtraHandler) DisableGS1Unit(c *fiber.Ctx) error {
+	id := c.Params("id")
+	unitID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid_id"})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+	defer cancel()
+
+	tag, err := h.DB.Exec(ctx, `UPDATE gs1_label_units SET status='disabled' WHERE id=$1`, unitID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "db"})
+	}
+	if tag.RowsAffected() == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "not_found"})
+	}
+	adminID, _ := c.Locals(middleware.CtxAdminID).(int64)
+	h.Audit.Log(adminID, "gs1_unit.disable", "gs1_unit", id, nil, middleware.ClientIP(c), c.Get("User-Agent"))
+	return c.JSON(fiber.Map{"disabled": true})
+}
+
 // -------- Analytics: fraud tokens --------
 
 func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
 	defer cancel()
 
+	qrLimit := getScanLimit(ctx, h.DB, "qr")
+	gs1Limit := getScanLimit(ctx, h.DB, "gs1")
+
 	rows, err := h.DB.Query(ctx, `
 		SELECT 'qr' AS source, t.id, t.secret_code, t.scan_count, t.status,
 		       t.first_scanned_at, t.first_scan_city,
 		       COUNT(DISTINCT s.ip_address) FILTER (WHERE s.scanned_at > NOW() - INTERVAL '30 days') AS unique_ips,
 		       COUNT(DISTINCT s.city)       FILTER (WHERE s.scanned_at > NOW() - INTERVAL '30 days') AS unique_cities,
-		       b.batch_code, b.product_name
+		       b.batch_code, b.product_name,
+		       COALESCE(t.product_id, b.product_id) AS product_id, NULL::varchar AS gtin, NULL::bigint AS label_id,
+		       (t.scan_count > $1::int) AS locked
 		FROM qr_tokens t
 		JOIN batches b ON b.id = t.batch_id
 		LEFT JOIN scan_logs s ON s.token_id = t.id
-		WHERE t.scan_count > 3 OR t.status IN ('flagged','disabled')
-		GROUP BY t.id, b.batch_code, b.product_name
+		WHERE t.scan_count > 3 OR t.status IN ('flagged','disabled') OR t.scan_count > $1::int
+		GROUP BY t.id, b.batch_code, b.product_name, b.product_id
 		UNION ALL
 		SELECT 'gs1' AS source, u.id, u.verify_code, u.scan_count, u.status,
 		       u.first_scanned_at, u.first_scan_city,
 		       COUNT(DISTINCT g.ip_address) FILTER (WHERE g.scanned_at > NOW() - INTERVAL '30 days') AS unique_ips,
 		       COUNT(DISTINCT g.city)       FILTER (WHERE g.scanned_at > NOW() - INTERVAL '30 days') AS unique_cities,
-		       gl.lot, COALESCE(gl.product_name,'')
+		       gl.lot, COALESCE(gl.product_name,''),
+		       NULL::bigint AS product_id, gl.gtin, gl.id AS label_id,
+		       (u.scan_count > $2::int) AS locked
 		FROM gs1_label_units u
 		JOIN gs1_labels gl ON gl.id = u.label_id
 		LEFT JOIN gs1_unit_scan_logs g ON g.unit_id = u.id
-		WHERE u.scan_count > 3 OR u.status IN ('flagged','disabled')
-		GROUP BY u.id, gl.lot, gl.product_name
+		WHERE u.scan_count > 3 OR u.status IN ('flagged','disabled') OR u.scan_count > $2::int
+		GROUP BY u.id, gl.lot, gl.product_name, gl.gtin, gl.id
 		ORDER BY scan_count DESC
 		LIMIT 200
-	`)
+	`, qrLimit, gs1Limit)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "query"})
 	}
@@ -153,13 +183,17 @@ func (h *AdminExtraHandler) FraudList(c *fiber.Ctx) error {
 		UniqueCities   int        `json:"unique_cities"`
 		BatchCode      string     `json:"batch_code"`
 		ProductName    string     `json:"product_name"`
+		ProductID      *int64     `json:"product_id"`
+		Gtin           *string    `json:"gtin"`
+		LabelID        *int64     `json:"label_id"`
+		Locked         bool       `json:"locked"`
 	}
 	out := []row{}
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.Source, &r.ID, &r.SecretCode, &r.ScanCount, &r.Status,
 			&r.FirstScannedAt, &r.FirstScanCity, &r.UniqueIPs, &r.UniqueCities,
-			&r.BatchCode, &r.ProductName); err == nil {
+			&r.BatchCode, &r.ProductName, &r.ProductID, &r.Gtin, &r.LabelID, &r.Locked); err == nil {
 			out = append(out, r)
 		}
 	}
@@ -374,7 +408,8 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 		       COALESCE(sl.device_type,'') AS device_type, COALESCE(sl.os_name,'') AS os_name, COALESCE(sl.os_version,'') AS os_version,
 		       COALESCE(sl.browser_name,'') AS browser_name, COALESCE(sl.browser_version,'') AS browser_version,
 		       COALESCE(sl.ip_address::text,'') AS ip, sl.device_lat AS lat, sl.device_lng AS lng,
-		       COALESCE(sl.visitor_id,'') AS visitor_id
+		       COALESCE(sl.visitor_id,'') AS visitor_id,
+		       COALESCE(t.product_id, b.product_id) AS product_id, NULL::varchar AS gtin, NULL::bigint AS label_id
 		FROM scan_logs sl
 		JOIN qr_tokens t ON t.id = sl.token_id
 		JOIN batches b ON b.id = t.batch_id
@@ -386,7 +421,8 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 		       COALESCE(g.device_type,'') AS device_type, COALESCE(g.os_name,'') AS os_name, COALESCE(g.os_version,'') AS os_version,
 		       COALESCE(g.browser_name,'') AS browser_name, COALESCE(g.browser_version,'') AS browser_version,
 		       COALESCE(g.ip_address::text,'') AS ip, NULL::double precision AS lat, NULL::double precision AS lng,
-		       '' AS visitor_id
+		       '' AS visitor_id,
+		       NULL::bigint AS product_id, gl.gtin, gl.id AS label_id
 		FROM gs1_unit_scan_logs g
 		JOIN gs1_label_units u ON u.id = g.unit_id
 		JOIN gs1_labels gl ON gl.id = u.label_id
@@ -396,7 +432,7 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 	args := []any{days}
 	if q != "" {
 		args = append(args, "%"+q+"%")
-		where = fmt.Sprintf(` WHERE (code ILIKE $%d OR product_name ILIKE $%d OR batch_code ILIKE $%d)`, len(args), len(args), len(args))
+		where = fmt.Sprintf(` WHERE (code ILIKE $%d OR product_name ILIKE $%d OR batch_code ILIKE $%d OR gtin ILIKE $%d)`, len(args), len(args), len(args), len(args))
 	}
 
 	var total int
@@ -433,13 +469,17 @@ func (h *AdminExtraHandler) ScanLog(c *fiber.Ctx) error {
 		Lat            *float64  `json:"lat"`
 		Lng            *float64  `json:"lng"`
 		VisitorID      string    `json:"visitor_id"`
+		ProductID      *int64    `json:"product_id"`
+		Gtin           *string   `json:"gtin"`
+		LabelID        *int64    `json:"label_id"`
 	}
 	out := []row{}
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.ID, &r.ScannedAt, &r.IsRepeat, &r.Source, &r.SecretCode, &r.BatchCode, &r.ProductName,
 			&r.City, &r.Region, &r.Country, &r.DeviceType, &r.OSName, &r.OSVersion,
-			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID); err != nil {
+			&r.BrowserName, &r.BrowserVersion, &r.IP, &r.Lat, &r.Lng, &r.VisitorID,
+			&r.ProductID, &r.Gtin, &r.LabelID); err != nil {
 			log.Printf("scan-log row scan: %v", err)
 		} else {
 			out = append(out, r)
@@ -457,7 +497,11 @@ func (h *AdminExtraHandler) Summary(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	defer cancel()
 
+	qrLimit := getScanLimit(ctx, h.DB, "qr")
+	gs1Limit := getScanLimit(ctx, h.DB, "gs1")
+
 	var totalTokens, activated, totalScans, todayScans, uniquePhones, flagged int
+	var flaggedGS1, disabledQR, disabledGS1, lockedQR, lockedGS1 int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT
 		  (SELECT COUNT(*) FROM qr_tokens),
@@ -465,16 +509,33 @@ func (h *AdminExtraHandler) Summary(c *fiber.Ctx) error {
 		  (SELECT COALESCE(SUM(scan_count),0) FROM qr_tokens),
 		  (SELECT COUNT(*) FROM scan_logs WHERE scanned_at > NOW() - INTERVAL '24 hours'),
 		  (SELECT COUNT(*) FROM customer_leads),
-		  (SELECT COUNT(*) FROM qr_tokens WHERE status='flagged')
-	`).Scan(&totalTokens, &activated, &totalScans, &todayScans, &uniquePhones, &flagged)
+		  (SELECT COUNT(*) FROM qr_tokens WHERE status='flagged'),
+		  (SELECT COUNT(*) FROM gs1_label_units WHERE status='flagged'),
+		  (SELECT COUNT(*) FROM qr_tokens WHERE status='disabled'),
+		  (SELECT COUNT(*) FROM gs1_label_units WHERE status='disabled'),
+		  (SELECT COUNT(*) FROM qr_tokens WHERE scan_count > $1::int),
+		  (SELECT COUNT(*) FROM gs1_label_units WHERE scan_count > $2::int)
+	`, qrLimit, gs1Limit).Scan(&totalTokens, &activated, &totalScans, &todayScans, &uniquePhones, &flagged,
+		&flaggedGS1, &disabledQR, &disabledGS1, &lockedQR, &lockedGS1)
 
 	return c.JSON(fiber.Map{
-		"total_tokens":       totalTokens,
-		"activated_tokens":   activated,
-		"total_scans":        totalScans,
-		"scans_last_24h":     todayScans,
-		"unique_customers":   uniquePhones,
-		"flagged_tokens":     flagged,
+		"total_tokens":      totalTokens,
+		"activated_tokens":  activated,
+		"total_scans":       totalScans,
+		"scans_last_24h":    todayScans,
+		"unique_customers":  uniquePhones,
+		"flagged_tokens":    flagged,
+		"fraud_summary": fiber.Map{
+			"flagged_qr":     flagged,
+			"flagged_gs1":    flaggedGS1,
+			"flagged_total":  flagged + flaggedGS1,
+			"disabled_qr":    disabledQR,
+			"disabled_gs1":   disabledGS1,
+			"disabled_total": disabledQR + disabledGS1,
+			"locked_qr":      lockedQR,
+			"locked_gs1":     lockedGS1,
+			"locked_total":   lockedQR + lockedGS1,
+		},
 	})
 }
 

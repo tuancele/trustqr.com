@@ -8,8 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// FraudDetector periodically flags qr_tokens that show suspicious scan patterns.
-// Rule: within last 24h, if a token was scanned from >=3 distinct cities OR >=10 distinct IPs, flag it.
+// FraudDetector periodically flags qr_tokens and gs1_label_units that show
+// suspicious scan patterns.
+// Rule: within last 24h, if a token/unit was scanned from >=3 distinct cities OR >=10 distinct IPs, flag it.
 type FraudDetector struct {
 	DB       *pgxpool.Pool
 	Interval time.Duration
@@ -57,10 +58,23 @@ func (f *FraudDetector) RunOnce() {
 		) AND status IN ('activated','pending')
 	`)
 	if err != nil {
-		log.Printf("[fraud] scan failed: %v", err)
-		return
+		log.Printf("[fraud] qr scan failed: %v", err)
+	} else if n := tag.RowsAffected(); n > 0 {
+		log.Printf("[fraud] flagged %d qr tokens as suspicious", n)
 	}
-	if n := tag.RowsAffected(); n > 0 {
-		log.Printf("[fraud] flagged %d tokens as suspicious", n)
+
+	tagGS1, err := f.DB.Exec(ctx, `
+		UPDATE gs1_label_units SET status='flagged'
+		WHERE id IN (
+			SELECT g.unit_id FROM gs1_unit_scan_logs g
+			WHERE g.scanned_at > NOW() - INTERVAL '24 hours'
+			GROUP BY g.unit_id
+			HAVING COUNT(DISTINCT g.city) >= 3 OR COUNT(DISTINCT g.ip_address) >= 10
+		) AND status = 'active'
+	`)
+	if err != nil {
+		log.Printf("[fraud] gs1 scan failed: %v", err)
+	} else if n := tagGS1.RowsAffected(); n > 0 {
+		log.Printf("[fraud] flagged %d gs1 units as suspicious", n)
 	}
 }

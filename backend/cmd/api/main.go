@@ -257,6 +257,7 @@ func main() {
 	protected.Get("/tokens/:code/trace", admin.GetTokenTrace)
 	protected.Get("/tokens/:code/qr.png", admin.GetQRImage)
 	protected.Patch("/tokens/:id/disable", adminExtra.DisableToken)
+	protected.Patch("/gs1-units/:id/disable", adminExtra.DisableGS1Unit)
 
 	protected.Post("/boxes", adminExtra.AssignBox)
 

@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
   BarChart3, ShieldAlert, MapPin, CheckCircle2, TrendingUp, Activity, Flame,
   Smartphone, Cpu, Globe, ScanLine, Search, ChevronLeft, ChevronRight, Navigation,
+  Lock, Ban, Package, Tag, Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/adminApi';
 import { PageHeader, StatCard, Spinner, StatusBadge, EmptyState } from '@/components/ui';
@@ -18,6 +20,8 @@ type GeoRow = { city: string; scans: number; unique_tokens: number };
 type FraudRow = {
   source: 'qr' | 'gs1'; id: number; secret_code: string; scan_count: number; status: string;
   unique_ips: number; unique_cities: number; batch_code: string; product_name: string;
+  product_id: number | null; gtin: string | null; label_id: number | null; locked: boolean;
+  first_scanned_at: string | null; first_scan_city: string | null;
 };
 type ScanLogRow = {
   id: number; scanned_at: string; is_repeat: boolean; source: 'qr' | 'gs1';
@@ -26,6 +30,12 @@ type ScanLogRow = {
   device_type: string; os_name: string; os_version: string;
   browser_name: string; browser_version: string;
   ip: string; lat: number | null; lng: number | null; visitor_id: string;
+  product_id: number | null; gtin: string | null; label_id: number | null;
+};
+type FraudSummary = {
+  flagged_qr: number; flagged_gs1: number; flagged_total: number;
+  disabled_qr: number; disabled_gs1: number; disabled_total: number;
+  locked_qr: number; locked_gs1: number; locked_total: number;
 };
 
 function SourceBadge({ source }: { source: 'qr' | 'gs1' }) {
@@ -39,6 +49,27 @@ type ScanLogResp = { data: ScanLogRow[]; total: number; page: number; page_size:
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 
+function LinkedCode({ row }: { row: { source: 'qr' | 'gs1'; gtin: string | null; label_id: number | null; product_id: number | null; product_name: string } }) {
+  if (row.source === 'gs1') {
+    if (row.gtin && row.label_id) {
+      return (
+        <Link href={`/admin/gs1/${row.label_id}`} className="inline-flex items-center gap-1 font-mono text-xs text-emerald-700 hover:underline">
+          <Tag className="w-3 h-3" /> {row.gtin}
+        </Link>
+      );
+    }
+    return <span className="text-xs text-gray-400 italic">Không có GTIN</span>;
+  }
+  if (row.product_id) {
+    return (
+      <Link href={`/admin/products/${row.product_id}/edit`} className="inline-flex items-center gap-1 text-xs text-gov-700 hover:underline">
+        <Package className="w-3 h-3" /> {row.product_name || `#${row.product_id}`}
+      </Link>
+    );
+  }
+  return <span className="text-xs text-gray-500">{row.product_name || <span className="text-gray-400 italic">—</span>}</span>;
+}
+
 export default function AnalyticsPage() {
   const [days, setDays] = useState<number>(30);
   const [loading, setLoading] = useState(true);
@@ -48,6 +79,8 @@ export default function AnalyticsPage() {
   const [browsers, setBrowsers] = useState<BreakdownItem[]>([]);
   const [geo, setGeo] = useState<GeoRow[]>([]);
   const [frauds, setFrauds] = useState<FraudRow[]>([]);
+  const [fraudSummary, setFraudSummary] = useState<FraudSummary | null>(null);
+  const [disabling, setDisabling] = useState<string | null>(null);
 
   const [scanLog, setScanLog] = useState<ScanLogResp | null>(null);
   const [scanLoading, setScanLoading] = useState(true);
@@ -75,6 +108,11 @@ export default function AnalyticsPage() {
     return () => { cancelled = true; };
   }, [days, scanPage, scanSearch]);
 
+  const reloadFrauds = () => {
+    api<FraudRow[]>('/api/v1/admin/analytics/frauds').then((r) => { if (r.ok) setFrauds(r.data || []); });
+    api<{ fraud_summary: FraudSummary }>('/api/v1/admin/analytics/summary').then((r) => { if (r.ok && r.data) setFraudSummary(r.data.fraud_summary); });
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -83,7 +121,8 @@ export default function AnalyticsPage() {
       api<{ devices: BreakdownItem[]; os: BreakdownItem[]; browsers: BreakdownItem[] }>(`/api/v1/admin/analytics/devices?days=${days}`),
       api<{ data: GeoRow[] }>(`/api/v1/admin/analytics/geo?days=${days}`),
       api<FraudRow[]>('/api/v1/admin/analytics/frauds'),
-    ]).then(([trendRes, devicesRes, geoRes, fraudsRes]) => {
+      api<{ fraud_summary: FraudSummary }>('/api/v1/admin/analytics/summary'),
+    ]).then(([trendRes, devicesRes, geoRes, fraudsRes, summaryRes]) => {
       if (cancelled) return;
       if (trendRes.ok) setTrend(trendRes.data?.data || []);
       if (devicesRes.ok) {
@@ -93,9 +132,20 @@ export default function AnalyticsPage() {
       }
       if (geoRes.ok) setGeo(geoRes.data?.data || []);
       if (fraudsRes.ok) setFrauds(fraudsRes.data || []);
+      if (summaryRes.ok && summaryRes.data) setFraudSummary(summaryRes.data.fraud_summary);
     }).finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [days]);
+
+  const disableRow = async (row: FraudRow) => {
+    if (!confirm(`Vô hiệu hóa tem ${row.secret_code}? Hành động này ghi vào audit log.`)) return;
+    const key = `${row.source}-${row.id}`;
+    setDisabling(key);
+    const path = row.source === 'gs1' ? `/api/v1/admin/gs1-units/${row.id}/disable` : `/api/v1/admin/tokens/${row.id}/disable`;
+    const r = await api(path, { method: 'PATCH' });
+    setDisabling(null);
+    if (r.ok) reloadFrauds();
+  };
 
   const stats = useMemo(() => {
     const totalScans = trend.reduce((s, p) => s + p.scans, 0);
@@ -140,7 +190,13 @@ export default function AnalyticsPage() {
           value={stats.peak ? fmtNumber(stats.peak.scans) : '—'}
           sub={stats.peak ? fmtDateShort(stats.peak.day) : undefined}
         />
-        <StatCard icon={ShieldAlert} tone="red" label="Tem nghi giả" value={fmtNumber(frauds.length)} />
+        <StatCard
+          icon={ShieldAlert}
+          tone="red"
+          label="Tem nghi giả"
+          value={fmtNumber(fraudSummary ? fraudSummary.flagged_total : frauds.length)}
+          sub={fraudSummary ? `${fmtNumber(fraudSummary.locked_total)} bị khóa · ${fmtNumber(fraudSummary.disabled_total)} bị vô hiệu hóa` : undefined}
+        />
       </div>
 
       {/* Trend chart */}
@@ -226,10 +282,23 @@ export default function AnalyticsPage() {
 
       {/* Fraud section */}
       <section className="card overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-2">
           <ShieldAlert className="w-4 h-4 text-red-500" />
           <h2 className="font-semibold text-gray-900">Tem nghi giả</h2>
-          <span className="text-xs text-gray-500">(scan_count &gt; 3 hoặc bị flag)</span>
+          <span className="text-xs text-gray-500">(scan_count &gt; 3, bị flag, hoặc bị khóa)</span>
+          {fraudSummary && (
+            <div className="ml-auto flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 text-amber-700 font-medium">
+                <ShieldAlert className="w-3 h-3" /> Bị flag: {fmtNumber(fraudSummary.flagged_total)} (QR {fraudSummary.flagged_qr} · GS1 {fraudSummary.flagged_gs1})
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-50 text-red-700 font-medium">
+                <Lock className="w-3 h-3" /> Bị khóa: {fmtNumber(fraudSummary.locked_total)} (QR {fraudSummary.locked_qr} · GS1 {fraudSummary.locked_gs1})
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium">
+                <Ban className="w-3 h-3" /> Đã vô hiệu hóa: {fmtNumber(fraudSummary.disabled_total)} (QR {fraudSummary.disabled_qr} · GS1 {fraudSummary.disabled_gs1})
+              </span>
+            </div>
+          )}
         </div>
         {frauds.length === 0 ? (
           <div className="p-10 text-center">
@@ -245,26 +314,57 @@ export default function AnalyticsPage() {
                   <th className="px-4 py-3">Nguồn</th>
                   <th className="px-4 py-3">Secret Code</th>
                   <th className="px-4 py-3">Lô</th>
-                  <th className="px-4 py-3">Sản phẩm</th>
+                  <th className="px-4 py-3">Liên kết (Sản phẩm / GTIN)</th>
                   <th className="px-4 py-3">Trạng thái</th>
                   <th className="px-4 py-3 text-right">Scans</th>
                   <th className="px-4 py-3 text-right">Unique IPs (30d)</th>
                   <th className="px-4 py-3 text-right">Cities (30d)</th>
+                  <th className="px-4 py-3">Lần quét đầu</th>
+                  <th className="px-4 py-3 text-right">Hành động</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {frauds.map((f) => (
-                  <tr key={`${f.source}-${f.id}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-3"><SourceBadge source={f.source} /></td>
-                    <td className="px-4 py-3 font-mono text-xs text-gov-700">{f.secret_code}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{f.batch_code}</td>
-                    <td className="px-4 py-3 text-gray-700">{f.product_name}</td>
-                    <td className="px-4 py-3"><StatusBadge status={f.status} /></td>
-                    <td className="px-4 py-3 text-right font-bold text-red-700">{f.scan_count}</td>
-                    <td className="px-4 py-3 text-right">{f.unique_ips}</td>
-                    <td className="px-4 py-3 text-right">{f.unique_cities}</td>
-                  </tr>
-                ))}
+                {frauds.map((f) => {
+                  const key = `${f.source}-${f.id}`;
+                  return (
+                    <tr key={key} className="hover:bg-gray-50">
+                      <td className="px-4 py-3"><SourceBadge source={f.source} /></td>
+                      <td className="px-4 py-3 font-mono text-xs text-gov-700">{f.secret_code}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{f.batch_code}</td>
+                      <td className="px-4 py-3"><LinkedCode row={f} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <StatusBadge status={f.status} />
+                          {f.locked && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">
+                              <Lock className="w-2.5 h-2.5" /> Khóa
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold text-red-700">{f.scan_count}</td>
+                      <td className="px-4 py-3 text-right">{f.unique_ips}</td>
+                      <td className="px-4 py-3 text-right">{f.unique_cities}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {f.first_scanned_at ? fmtDateShort(f.first_scanned_at) : '—'}
+                        {f.first_scan_city && <div className="text-gray-400">{f.first_scan_city}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {f.status !== 'disabled' ? (
+                          <button
+                            onClick={() => disableRow(f)}
+                            disabled={disabling === key}
+                            className="btn-danger !py-1 !px-2 text-xs disabled:opacity-50"
+                          >
+                            {disabling === key ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Vô hiệu hóa'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -321,7 +421,10 @@ export default function AnalyticsPage() {
 
                       <td className="px-4 py-3">
                         <div className="font-mono text-xs text-gov-700">{s.secret_code}</div>
-                        <div className="text-xs text-gray-500">{s.product_name} <span className="text-gray-400">· {s.batch_code}</span></div>
+                        <div className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+                          <LinkedCode row={s} />
+                          <span className="text-gray-400">· {s.batch_code}</span>
+                        </div>
                       </td>
 
                       <td className="px-4 py-3 max-w-[200px]">
